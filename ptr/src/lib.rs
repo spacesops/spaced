@@ -18,7 +18,9 @@ use spaces_protocol::hasher::{KeyHasher, KeyHash, Hash};
 use spaces_protocol::slabel::SLabel;
 use spaces_protocol::{Bytes, SpaceOut};
 #[cfg(feature = "std")]
-use log::info;
+use log::{info, warn};
+#[cfg(feature = "std")]
+use hex;
 use crate::constants::COMMITMENT_FINALITY_INTERVAL;
 use crate::sptr::{Sptr};
 
@@ -431,6 +433,33 @@ impl Validator {
 
         let commitment_op = find_op_commit(&tx.output);
         let data_op = find_op_set_data(&tx.output);
+        
+        // Enhanced logging for specific transactions
+        #[cfg(feature = "std")]
+        {
+            let txid = tx.compute_txid();
+            let txid_str = txid.to_string();
+            if txid_str == "1bbb0f3b4b9a58db907cedc611942f5fc736768fff443e23cc71dfba98d503b8" ||
+               txid_str == "ebfaa3c2715f0e89fc188e9dc6dbaa79037458ce9058195153294b2ea3d8f118" {
+                info!(
+                    "=== PTR PROCESSING DEBUG for txid={} ===\n\
+                    data_op found: {}\n\
+                    data_op length: {}\n\
+                    data_op hex: {}\n\
+                    num_outputs: {}\n\
+                    outputs with OP_RETURN: {}",
+                    txid_str,
+                    data_op.is_some(),
+                    data_op.as_ref().map(|d| d.as_slice().len()).unwrap_or(0),
+                    data_op.as_ref().map(|d| hex::encode(d.as_slice())).unwrap_or_else(|| "None".to_string()),
+                    tx.output.len(),
+                    tx.output.iter().filter(|out| {
+                        let mut instructions = out.script_pubkey.instructions();
+                        matches!(instructions.next(), Some(Ok(Instruction::Op(OP_RETURN))))
+                    }).count()
+                );
+            }
+        }
 
         // Remove sptr -> space mappings if a space is spent
         changeset.revoked_delegations = spent_space_utxos
@@ -619,10 +648,105 @@ impl Validator {
         // Only update data if:
         // 1. A data OP_RETURN is present
         // 2. PTR is P2TR and input uses SIGHASH_ALL (prevents malicious data injection)
+        let sptr_id = ptr.id;
+        let txid = tx.compute_txid();
+        
         if let Some(new_data) = data {
-            if ptrout.script_pubkey.is_p2tr() && is_p2tr_sighash_all(tx, input_index) {
-                ptr.data = Some(new_data.clone());
+            let is_p2tr = ptrout.script_pubkey.is_p2tr();
+            let is_sighash_all = is_p2tr_sighash_all(tx, input_index);
+            
+            // Enhanced logging for specific transactions
+            #[cfg(feature = "std")]
+            {
+                let txid_str = txid.to_string();
+                if txid_str == "1bbb0f3b4b9a58db907cedc611942f5fc736768fff443e23cc71dfba98d503b8" ||
+                   txid_str == "ebfaa3c2715f0e89fc188e9dc6dbaa79037458ce9058195153294b2ea3d8f118" {
+                    let input = tx.input.get(input_index);
+                    let witness_info = input.map(|i| {
+                        let sig_len = if i.witness.len() > 0 { i.witness[0].len() } else { 0 };
+                        let sig_hex = if i.witness.len() > 0 { hex::encode(&i.witness[0]) } else { "None".to_string() };
+                        format!("witness_len={}, sig_len={}, sig_hex={}",
+                            i.witness.len(),
+                            sig_len,
+                            sig_hex
+                        )
+                    }).unwrap_or_else(|| "input_not_found".to_string());
+                    
+                    info!(
+                        "=== PTR SPEND DEBUG for txid={} sptr={} ===\n\
+                        input_index={}\n\
+                        is_p2tr={}\n\
+                        is_sighash_all={}\n\
+                        script_pubkey_hex={}\n\
+                        {}\n\
+                        data_len={}\n\
+                        data_hex={}",
+                        txid_str,
+                        sptr_id,
+                        input_index,
+                        is_p2tr,
+                        is_sighash_all,
+                        hex::encode(ptrout.script_pubkey.as_bytes()),
+                        witness_info,
+                        new_data.as_slice().len(),
+                        hex::encode(new_data.as_slice())
+                    );
+                }
             }
+            
+            if is_p2tr && is_sighash_all {
+                ptr.data = Some(new_data.clone());
+                #[cfg(feature = "std")]
+                info!(
+                    "PTR data updated for sptr={} txid={} height={} input_index={} data_len={}",
+                    sptr_id, txid, height, input_index, new_data.as_slice().len()
+                );
+            } else {
+                // Log why data update was skipped
+                #[cfg(feature = "std")]
+                warn!(
+                    "PTR data update skipped for sptr={} txid={} height={} input_index={}: data_op_present=true is_p2tr={} is_sighash_all={}",
+                    sptr_id, txid, height, input_index, is_p2tr, is_sighash_all
+                );
+            }
+        } else {
+            // Log when no data OP_RETURN is present (for debugging)
+            #[cfg(feature = "std")]
+            {
+                let txid_str = txid.to_string();
+                if txid_str == "1bbb0f3b4b9a58db907cedc611942f5fc736768fff443e23cc71dfba98d503b8" ||
+                   txid_str == "ebfaa3c2715f0e89fc188e9dc6dbaa79037458ce9058195153294b2ea3d8f118" {
+                    info!(
+                        "=== PTR SPEND DEBUG for txid={} sptr={} ===\n\
+                        input_index={}\n\
+                        NO DATA OP_RETURN FOUND\n\
+                        Checking all outputs for OP_RETURN patterns...",
+                        txid_str,
+                        sptr_id,
+                        input_index
+                    );
+                    for (idx, out) in tx.output.iter().enumerate() {
+                        let mut instructions = out.script_pubkey.instructions();
+                        let first = instructions.next();
+                        let second = instructions.next();
+                        let third = instructions.next();
+                        info!(
+                            "  output[{}]: value={}, script_len={}, first={:?}, second={:?}, third={:?}",
+                            idx,
+                            out.value,
+                            out.script_pubkey.len(),
+                            first,
+                            second,
+                            third
+                        );
+                    }
+                }
+            }
+            #[cfg(feature = "std")]
+            info!(
+                "PTR spend processed for sptr={} txid={} height={} input_index={}: no data OP_RETURN present",
+                sptr_id, txid, height, input_index
+            );
         }
         ptrout.n = output_index;
         ptrout.value = output.value;
@@ -650,7 +774,14 @@ pub enum PtrOp {
 /// Rollback: OP_RETURN OP_PUSHNUM_2 OP_PUSHBYTES_0
 pub fn find_op_commit(tx_outputs: &[TxOut]) -> Option<CommitmentOp> {
     tx_outputs.iter().find_map(|s| {
-        let mut instructions = s.script_pubkey.instructions().skip(1);
+        let mut instructions = s.script_pubkey.instructions();
+        // First instruction must be OP_RETURN
+        match instructions.next()?.ok()? {
+            Instruction::Op(OP_RETURN) => {},
+            _ => return None,
+        }
+        // Second instruction must be OP_PUSHNUM_2
+        // Third instruction must be PushBytes with the payload
         match (instructions.next()?.ok()?, instructions.next()?.ok()?) {
             (Instruction::Op(OP_PUSHNUM_2), Instruction::PushBytes(payload)) =>
                 {

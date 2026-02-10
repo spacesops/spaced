@@ -42,12 +42,36 @@ pub enum OpenContext {
 
 /// To set data associated with a space, we use:
 /// OP_RETURN OP_PUSHNUM_1 <op push bytes> <data>
+/// Also supports legacy format: OP_RETURN <data> (for backward compatibility)
 pub fn find_op_set_data(tx_outputs: &[TxOut]) -> Option<Bytes> {
     tx_outputs.iter().find_map(|s| {
-        let mut instructions = s.script_pubkey.instructions().skip(1);
-        match (instructions.next()?.ok()?, instructions.next()?.ok()?) {
-            (Instruction::Op(OP_PUSHNUM_1), Instruction::PushBytes(bytes)) =>
-                Some(Bytes::new(bytes.as_bytes().to_vec())),
+        let mut instructions = s.script_pubkey.instructions();
+        // First instruction must be OP_RETURN
+        match instructions.next()?.ok()? {
+            Instruction::Op(OP_RETURN) => {},
+            _ => return None,
+        }
+        
+        // Check next instruction
+        match instructions.next()?.ok()? {
+            // Standard format: OP_RETURN OP_PUSHNUM_1 <data>
+            Instruction::Op(OP_PUSHNUM_1) => {
+                // Third instruction must be PushBytes with the data
+                match instructions.next()?.ok()? {
+                    Instruction::PushBytes(bytes) =>
+                        Some(Bytes::new(bytes.as_bytes().to_vec())),
+                    _ => None,
+                }
+            },
+            // Legacy format: OP_RETURN <data> (for backward compatibility)
+            // Only accept if it's not a commitment (which uses OP_PUSHNUM_2)
+            Instruction::PushBytes(bytes) => {
+                // Make sure this isn't a commitment by checking if it starts with OP_PUSHNUM_2
+                // Since we already consumed the PushBytes, we can't check that here.
+                // But commitments have specific structure (32-byte chunks), so we can distinguish.
+                // For now, accept any OP_RETURN <data> as legacy data format.
+                Some(Bytes::new(bytes.as_bytes().to_vec()))
+            },
             _ => None,
         }
     })

@@ -14,6 +14,7 @@ use crate::{
         BitcoinBlockSource, BitcoinRpc, BitcoinRpcError, BlockEvent, BlockFetchError, BlockFetcher,
     },
     std_wait,
+    callbacks::CallbackRegistry,
 };
 use crate::store::chain::{Chain};
 
@@ -60,6 +61,7 @@ impl Spaced {
         node: &mut Client,
         id: ChainAnchor,
         block: Block,
+        callback_registry: &CallbackRegistry,
     ) -> anyhow::Result<()> {
         let sp_idx = self.chain.has_spaces_index();
         let pt_idx = self.chain.has_ptrs_index();
@@ -72,6 +74,26 @@ impl Spaced {
         }
         if let Some(result) = ptr_block_result {
             self.chain.apply_block_to_ptrs_index(id.hash, result)?;
+        }
+
+        // Extract transaction IDs from block and notify callbacks
+        let block_txids: Vec<_> = block.txdata.iter().map(|tx| tx.compute_txid()).collect();
+        let chain_tip = self.chain.tip();
+        let block_hash_str = id.hash.to_string();
+        
+        // Use tokio runtime handle if available, otherwise skip notification
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let callback_registry_clone = callback_registry.clone();
+            handle.spawn(async move {
+                callback_registry_clone
+                    .check_and_notify(
+                        id.height,
+                        &block_hash_str,
+                        &block_txids,
+                        chain_tip.height,
+                    )
+                    .await;
+            });
         }
 
         let new_tip = ChainAnchor {
@@ -89,6 +111,7 @@ impl Spaced {
         &mut self,
         source: BitcoinBlockSource,
         shutdown: broadcast::Sender<()>,
+        callback_registry: CallbackRegistry,
     ) -> anyhow::Result<()> {
         let start_block = self.chain.tip();
         let mut node = Client::new(self.block_index_full);
@@ -123,7 +146,7 @@ impl Spaced {
                         }
                     }
                     BlockEvent::Block(id, block) => {
-                        self.handle_block(&mut node, id, block)?;
+                        self.handle_block(&mut node, id, block, &callback_registry)?;
                         info!("block={} height={}", id.hash, id.height);
                     }
                     BlockEvent::Error(e) if matches!(e, BlockFetchError::BlockMismatch) => {

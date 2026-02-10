@@ -313,6 +313,10 @@ impl Chain {
         self.db.pt.state.remove(key)
     }
 
+    pub(crate) fn remove_ptr(&mut self, sptr: Sptr) {
+        self.db.pt.state.remove(sptr)
+    }
+
 
 
     pub fn remove_commitment(&mut self, commitment: CommitmentKey) {

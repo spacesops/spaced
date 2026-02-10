@@ -686,24 +686,35 @@ fn parse_ptr_for_json(ptr: &spaces_ptr::FullPtrOut) -> serde_json::Value {
     // appears directly in the JSON object, not nested. Look for "data" at the top level.
     if let Some(obj) = ptr_json.as_object_mut() {
         if let Some(data) = obj.remove("data") {
+            // Skip processing if data is null (None)
+            if data.is_null() {
+                obj.insert("data".to_string(), data);
+                return ptr_json;
+            }
+            
+            // Always keep the original data field to ensure complete data is returned
+            let data_clone = data.clone();
+            
             // Bytes serializes as hex string in JSON
             if let Some(hex_str) = data.as_str() {
                 if let Ok(data_bytes) = hex::decode(hex_str) {
                     match vtlv::parse_vtlv(&data_bytes) {
                         Ok(parsed) => {
                             obj.insert("parsed".to_string(), serde_json::to_value(parsed).expect("parsed should be serializable"));
+                            // Always include the raw data field as well
+                            obj.insert("data".to_string(), data_clone);
                         }
                         Err(_) => {
                             // If parsing fails, keep the original data
-                            obj.insert("data".to_string(), data);
+                            obj.insert("data".to_string(), data_clone);
                         }
                     }
                 } else {
-                    obj.insert("data".to_string(), data);
+                    obj.insert("data".to_string(), data_clone);
                 }
             } else {
-                // Not a string, keep as-is
-                obj.insert("data".to_string(), data);
+                // Not a string, keep as-is (could be null or other type)
+                obj.insert("data".to_string(), data_clone);
             }
         }
     }
@@ -1266,7 +1277,15 @@ async fn handle_commands(cli: &SpaceCli, command: Commands) -> Result<(), Client
                 .get_ptr(sptr)
                 .await
                 .map_err(|e| ClientError::Custom(e.to_string()))?;
-            println!("{}", serde_json::to_string(&ptr).expect("result"));
+            if let Some(ptr) = ptr {
+                let parsed_ptr = parse_ptr_for_json(&ptr);
+                match serde_json::to_string(&parsed_ptr) {
+                    Ok(json_str) => println!("{}", json_str),
+                    Err(e) => return Err(ClientError::Custom(format!("Failed to serialize result: {}", e))),
+                }
+            } else {
+                println!("null");
+            }
         }
         Commands::GetAllPtrs { with_data } => {
             let ptrs = cli

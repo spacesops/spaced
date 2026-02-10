@@ -15,8 +15,12 @@ use spaces_protocol::{
     validate::{TxChangeSet, UpdateKind, Validator},
     Bytes, Covenant, FullSpaceOut, RevokeReason, SpaceOut,
 };
-use spaces_ptr::{CommitmentKey, RegistryKey, RegistrySptrKey, PtrOutpointKey};
+use spaces_ptr::{CommitmentKey, PtrSource, RegistryKey, RegistrySptrKey, PtrOutpointKey};
 use spaces_wallet::bitcoin::{Network, Transaction};
+#[cfg(feature = "std")]
+use log::info;
+#[cfg(feature = "std")]
+use hex;
 
 use crate::{
     source::BitcoinRpcError,
@@ -270,6 +274,31 @@ impl Client {
                 let ptrs_validated = self.ptr_validator
                     .process::<Sha256>(height, &tx, ptrs_ctx, spent_spaceouts, created_spaceouts);
 
+                // Check for specific transactions of interest
+                let txid = tx.compute_txid();
+                #[cfg(feature = "std")]
+                {
+                    let txid_str = txid.to_string();
+                    if txid_str == "1bbb0f3b4b9a58db907cedc611942f5fc736768fff443e23cc71dfba98d503b8" ||
+                       txid_str == "ebfaa3c2715f0e89fc188e9dc6dbaa79037458ce9058195153294b2ea3d8f118" {
+                        info!(
+                            "=== DETECTED TARGET TRANSACTION ===\n\
+                            txid={}\n\
+                            height={}\n\
+                            position={}\n\
+                            spends={:?}\n\
+                            creates={}\n\
+                            changeset_txid={}",
+                            txid_str,
+                            height,
+                            position,
+                            ptrs_validated.spends,
+                            ptrs_validated.creates.len(),
+                            ptrs_validated.txid
+                        );
+                    }
+                }
+
                 if let Some(idx) = ptr_meta.as_mut() {
                     {
                         idx.tx_meta.push(PtrTxEntry {
@@ -300,10 +329,51 @@ impl Client {
     }
 
     fn apply_ptrs_tx(&self, state: &mut Chain, tx: &Transaction, changeset: spaces_ptr::TxChangeSet) {
+        let txid = tx.compute_txid();
+        let txid_str = txid.to_string();
+        let is_target_tx = txid_str == "1bbb0f3b4b9a58db907cedc611942f5fc736768fff443e23cc71dfba98d503b8" ||
+                          txid_str == "ebfaa3c2715f0e89fc188e9dc6dbaa79037458ce9058195153294b2ea3d8f118";
+        
+        // First, collect all SPTR IDs that need their old mappings removed
+        let mut sptrs_to_remove = Vec::new();
+        for n in changeset.spends.iter() {
+            let previous = tx.input[*n].previous_output;
+            // Get the old PtrOut to extract the SPTR ID before removing it
+            if let Ok(Some(old_ptrout)) = state.get_ptrout(&previous) {
+                if let Some(old_ptr) = old_ptrout.sptr.as_ref() {
+                    sptrs_to_remove.push((old_ptr.id, old_ptrout.clone()));
+                    #[cfg(feature = "std")]
+                    if is_target_tx {
+                        info!(
+                            "TARGET TX {}: Found old PTR spend at input {}: sptr={} old_outpoint={} old_data={:?}",
+                            txid_str,
+                            n,
+                            old_ptr.id,
+                            previous,
+                            old_ptr.data.as_ref().map(|d| hex::encode(d.as_slice()))
+                        );
+                    }
+                }
+            }
+        }
+        
         // Remove spends
         for n in changeset.spends.into_iter() {
             let previous = tx.input[n].previous_output;
             state.remove_ptr_utxo(previous);
+        }
+        
+        // Remove old SPTR -> OutPoint mappings after we've collected all SPTR IDs
+        for (sptr_id, old_ptrout) in sptrs_to_remove {
+            #[cfg(feature = "std")]
+            if is_target_tx {
+                info!(
+                    "TARGET TX {}: Removing old SPTR->OutPoint mapping: sptr={}",
+                    txid_str,
+                    sptr_id
+                );
+            }
+            state.remove_ptr(sptr_id);
         }
 
         // Remove revoked delegations
@@ -335,7 +405,7 @@ impl Client {
 
         }
 
-        // Create ptrs
+        // Create ptrs - insert new mappings (this will overwrite any old mappings for the same SPTR)
         for create in changeset.creates.into_iter() {
             let outpoint = OutPoint {
                 txid: changeset.txid,
@@ -343,12 +413,39 @@ impl Client {
             };
 
             // Ptr => Outpoint
+            // Note: This will overwrite any existing mapping for this SPTR ID
+            // We've already removed the old mapping above, but this ensures consistency
             if let Some(ptr) = create.sptr.as_ref() {
+                #[cfg(feature = "std")]
+                if is_target_tx {
+                    info!(
+                        "TARGET TX {}: Inserting new SPTR->OutPoint mapping: sptr={} outpoint={}:{} data={:?}",
+                        txid_str,
+                        ptr.id,
+                        outpoint.txid,
+                        outpoint.vout,
+                        ptr.data.as_ref().map(|d| hex::encode(d.as_slice()))
+                    );
+                }
                 state.insert_ptr(ptr.id, outpoint.into());
             }
 
             // Outpoint => PtrOut
             let outpoint_key = PtrOutpointKey::from_outpoint::<Sha256>(outpoint);
+            #[cfg(feature = "std")]
+            if is_target_tx {
+                if let Some(ptr) = create.sptr.as_ref() {
+                    info!(
+                        "TARGET TX {}: Inserting new OutPoint->PtrOut: outpoint={}:{} sptr={} n={} value={}",
+                        txid_str,
+                        outpoint.txid,
+                        outpoint.vout,
+                        ptr.id,
+                        create.n,
+                        create.value.to_sat()
+                    );
+                }
+            }
             state.insert_ptrout(outpoint_key, create);
         }
     }
