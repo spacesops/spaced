@@ -1,8 +1,10 @@
 #[cfg(feature = "std")]
 pub mod sptr;
 pub mod constants;
-#[cfg(feature = "serde")]
-pub mod vtlv;
+// VTLV parsing is now provided by the reusable `spaces_vtlv` crate.
+// Re-export here for backwards compatibility so existing code can
+// continue to refer to `spaces_ptr::vtlv::*`.
+pub use spaces_vtlv as vtlv;
 
 #[cfg(feature = "bincode")]
 use bincode::{Decode, Encode};

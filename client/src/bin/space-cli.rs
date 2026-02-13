@@ -678,48 +678,9 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn parse_ptr_for_json(ptr: &spaces_ptr::FullPtrOut) -> serde_json::Value {
-    use spaces_ptr::vtlv;
-    
-    let mut ptr_json = serde_json::to_value(ptr).expect("ptr should be serializable");
-    
-    // Since ptrout and sptr are flattened via serde(flatten), the data field
-    // appears directly in the JSON object, not nested. Look for "data" at the top level.
-    if let Some(obj) = ptr_json.as_object_mut() {
-        if let Some(data) = obj.remove("data") {
-            // Skip processing if data is null (None)
-            if data.is_null() {
-                obj.insert("data".to_string(), data);
-                return ptr_json;
-            }
-            
-            // Always keep the original data field to ensure complete data is returned
-            let data_clone = data.clone();
-            
-            // Bytes serializes as hex string in JSON
-            if let Some(hex_str) = data.as_str() {
-                if let Ok(data_bytes) = hex::decode(hex_str) {
-                    match vtlv::parse_vtlv(&data_bytes) {
-                        Ok(parsed) => {
-                            obj.insert("parsed".to_string(), serde_json::to_value(parsed).expect("parsed should be serializable"));
-                            // Always include the raw data field as well
-                            obj.insert("data".to_string(), data_clone);
-                        }
-                        Err(_) => {
-                            // If parsing fails, keep the original data
-                            obj.insert("data".to_string(), data_clone);
-                        }
-                    }
-                } else {
-                    obj.insert("data".to_string(), data_clone);
-                }
-            } else {
-                // Not a string, keep as-is (could be null or other type)
-                obj.insert("data".to_string(), data_clone);
-            }
-        }
-    }
-    
-    ptr_json
+    // `FullPtrOut` flattens the `data` field at the top level, so we can
+    // directly use the generic helper from `spaces_vtlv`.
+    spaces_vtlv::enrich_json_with_vtlv(ptr, "data")
 }
 
 fn parse_space_for_json(space: &spaces_protocol::FullSpaceOut) -> serde_json::Value {

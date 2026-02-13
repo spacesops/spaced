@@ -76,13 +76,43 @@ spaced --chain testnet4 --bitcoin-rpc-user testnet4 --bitcoin-rpc-password testn
 ## Project Structure
 
 
-| Package  | Requires std    | Description                                                                                     |
-|----------|-----------------|-------------------------------------------------------------------------------------------------|
-| client   | Yes             | Bitcoin consensus client and wallet service                                                     |
-| wallet   | Yes (no-std WIP) | Wallet library for building spaces transactions                                                 |
-| protocol | No              | Protocol consensus library                                                                      |
-| veritas  | No              | Stateless verifier library for mobile and other resource constrained devices with wasm support. | 
+| Package    | Requires std      | Description                                                                                     |
+|------------|-------------------|-------------------------------------------------------------------------------------------------|
+| client     | Yes               | Bitcoin consensus client and wallet service                                                     |
+| wallet     | Yes (no-std WIP)  | Wallet library for building spaces transactions                                                 |
+| protocol   | No                | Protocol consensus library                                                                      |
+| veritas    | No                | Stateless verifier library for mobile and other resource constrained devices with wasm support |
+| spaces_vtlv | Yes              | VTLV parsing and JSON helpers for PTR/space data (lives in a separate repo, included as a git submodule) |
 
+### Using the `spaces_vtlv` submodule
+
+The `spaces_vtlv` crate is developed in its own repository and is pulled into this workspace as a **git submodule** at `spaces_vtlv/`.
+
+- **Cloning with submodules**:
+  ```sh
+  git clone --recurse-submodules https://github.com/spacesprotocol/spaced.git
+  cd spaced
+  ```
+
+- **If you already cloned without submodules**:
+  ```sh
+  git submodule update --init --recursive
+  ```
+
+The workspace and individual crates refer to `spaces_vtlv` as a normal Cargo path dependency, for example:
+
+```toml
+[dependencies]
+spaces_vtlv = { path = "../spaces_vtlv" }
+```
+
+From a Rust crate, you can then use its APIs as usual:
+
+```rust
+use spaces_vtlv::{parse_vtlv, enrich_json_with_vtlv};
+```
+
+This keeps the VTLV logic reusable in other Rust projects (either via the submodule pattern or by depending directly on the standalone `spaces_vtlv` repository), while still integrating cleanly into this workspace.
 
 
 ## License

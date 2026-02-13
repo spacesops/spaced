@@ -7,6 +7,7 @@ edition = "2024"
 bitcoin = { version = "0.32.2", features = ["base64", "serde"], default-features = false }
 log = "0.4.14"
 spaces_protocol = {path = "../protocol"}
+spaces_vtlv = { path = "../spaces_vtlv" }
 
 ## optional features
 bincode = { version = "2.0.1", features = [ "derive", "serde", "alloc" ], default-features = false, optional = true }

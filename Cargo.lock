@@ -2358,6 +2358,7 @@ dependencies = [
  "spaces_protocol",
  "spaces_ptr",
  "spaces_testutil",
+ "spaces_vtlv",
  "spaces_wallet",
  "tabled",
  "threadpool",
@@ -2390,6 +2391,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spaces_protocol",
+ "spaces_vtlv",
 ]
 
 [[package]]
@@ -2426,6 +2428,15 @@ dependencies = [
  "spaces_protocol",
  "spaces_ptr",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "spaces_vtlv"
+version = "0.0.9"
+dependencies = [
+ "hex",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

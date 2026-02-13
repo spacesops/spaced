@@ -1,7 +1,7 @@
 [workspace]
 
 resolver = "2"
-members = [ "client", "protocol", "veritas", "testutil", "wallet", "ptr"]
+members = [ "client", "protocol", "veritas", "testutil", "wallet", "ptr", "spaces_vtlv"]
 
 [workspace.package]
 version = "0.0.9"

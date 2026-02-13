@@ -1,0 +1,3 @@
+[submodule "spaces_vtlv"]
+	path = spaces_vtlv
+	url = git@horologger-github:horologger/spaces-vtlv.git
