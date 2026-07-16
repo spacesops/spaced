@@ -602,12 +602,15 @@ pub struct TransferSpacesParams {
     pub secret: Option<String>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CreateNumParams {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub bind_spk: Option<ScriptBuf>,
+    /// SIP-7 record-set bytes for the num's on-chain fallback data (same format as `setfallback`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -1456,6 +1459,7 @@ impl RpcServer for RpcServerImpl {
             bidouts: None,
             requests: vec![RpcWalletRequest::CreateNum(CreateNumParams {
                 bind_spk: Some(bind_spk),
+                ..Default::default()
             })],
             fee_rate: Some(fee_rate),
             dust: None,

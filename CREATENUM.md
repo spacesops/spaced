@@ -6,10 +6,19 @@ This document describes how to create a new **num** with a **bound script public
 
 ```bash
 space-cli createnum --bind-spk <spk-hex> [--fee-rate <sat/vB>]
+space-cli createnum --bind-spk <spk-hex> --txt btc=bc1q... [--txt nostr=npub1...]
 ```
 
 - **`--bind-spk`** — script pubkey as hex (even-length hex string). Same bytes you would pass over JSON-RPC as `bind_spk`.
 - **`--fee-rate`** — optional; fee in **sat/vB**. If omitted, the wallet **estimates** a fee (via Bitcoin Core `estimatesmartfee`, same as other wallet operations without an explicit rate).
+- **Fallback data (optional)** — attach SIP-7 on-chain fallback data in the **same transaction** as num creation using the same flags as `setfallback`:
+  - **`--txt key=value`** — TXT record (repeatable)
+  - **`--addr key=addr[,addr...]`** — ADDR record (repeatable)
+  - **`--blob key=base64`** — BLOB record (repeatable)
+  - **`--raw <base64>`** — raw wire-format SIP-7 bytes
+  - **`--stdin`** — JSON record set from stdin
+
+See [docs/setfallback-payload.md](docs/setfallback-payload.md) for payload encoding details.
 
 Omitting `--bind-spk` is a different code path (auto-generated address). This document only covers the explicit `--bind-spk` case.
 
@@ -21,7 +30,7 @@ Transport, default ports, and `Authorization: Basic` are the same as in [ESTIMAT
 
 The CLI uses this method. Parameters are a **positional array**: `["<wallet_name>", <RpcWalletTxBuilder>]`.
 
-The builder should contain a **single** request of type `createnum` with `bind_spk` set to the same hex string as the CLI. Optional fee behavior matches the CLI:
+The builder should contain a **single** request of type `createnum` with `bind_spk` set to the same hex string as the CLI. Optionally include a **`data`** field with raw SIP-7 record-set bytes (same payload as `setfallback`). Optional fee behavior matches the CLI:
 
 - **`fee_rate: null`** — no explicit fee in the request; the node estimates (like omitting `--fee-rate`).
 - **`fee_rate: <u64>`** — wire format for [rust-bitcoin `FeeRate`](https://docs.rs/bitcoin/): the value is the internal **sat/kwu** integer, not sat/vB. Conversion: **sat/kwu = sat/vB × 250** (because 1 vB = 4 WU, and the newtype stores sat per 1000 WU). Example: 2 sat/vB → `500`.
@@ -39,7 +48,8 @@ Minimal example (no explicit fee, wallet name `default`):
       "requests": [
         {
           "request": "createnum",
-          "bind_spk": "5120aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          "bind_spk": "5120aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "data": [72, 101, 108, 108, 111]
         }
       ],
       "fee_rate": null,

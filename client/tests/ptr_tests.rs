@@ -93,7 +93,7 @@ async fn it_should_create_nums(rig: &TestRig) -> anyhow::Result<()> {
     let create0 = wallet_do(
         rig,
         ALICE,
-        vec![RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: Some(addr0_spk.clone()) })],
+        vec![RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: Some(addr0_spk.clone()), ..Default::default() })],
         false,
     ).await.expect("CreatePtr addr0");
     assert!(wallet_res_err(&create0).is_ok(), "CreatePtr(addr0) must not error");
@@ -141,7 +141,7 @@ async fn it_should_create_nums(rig: &TestRig) -> anyhow::Result<()> {
     let dup = wallet_do(
         rig,
         ALICE,
-        vec![RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: Some(addr0_spk.clone()) })],
+        vec![RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: Some(addr0_spk.clone()), ..Default::default() })],
         true,
     ).await.expect("duplicate CreatePtr(addr0)");
     assert!(wallet_res_err(&dup).is_ok(), "duplicate CreatePtr should not error");
@@ -777,6 +777,47 @@ async fn it_should_restore_delegation_when_transferring_back(rig: &TestRig) -> a
 
 // ============== Test: PTR Data ==============
 
+async fn it_should_create_ptr_with_data_in_one_tx(rig: &TestRig) -> anyhow::Result<()> {
+    sync_all(rig).await?;
+
+    let addr = rig
+        .spaced
+        .client
+        .wallet_get_new_address(ALICE, AddressKind::Coin)
+        .await?;
+    let spk = bitcoin::address::Address::from_str(&addr)?
+        .assume_checked()
+        .script_pubkey();
+    let test_data = b"Created with fallback data".to_vec();
+
+    wallet_do(
+        rig,
+        ALICE,
+        vec![RpcWalletRequest::CreateNum(CreateNumParams {
+            bind_spk: Some(spk.clone()),
+            data: Some(test_data.clone()),
+        })],
+        false,
+    )
+    .await?;
+    mine_and_sync(rig, 1).await?;
+
+    let id = NumId::from_spk::<Sha256>(spk.clone());
+    use spaces_protocol::Bytes;
+    let ptr = rig
+        .spaced
+        .client
+        .get_num(Subject::NumId(id))
+        .await?
+        .expect("ptr should exist");
+    assert_eq!(
+        ptr.numout.num.data,
+        Some(Bytes::new(test_data)),
+        "PTR should have data from create tx"
+    );
+    Ok(())
+}
+
 async fn it_should_set_and_persist_ptr_data(rig: &TestRig) -> anyhow::Result<()> {
     sync_all(rig).await?;
 
@@ -791,6 +832,7 @@ async fn it_should_set_and_persist_ptr_data(rig: &TestRig) -> anyhow::Result<()>
         ALICE,
         vec![RpcWalletRequest::CreateNum(CreateNumParams {
             bind_spk: Some(addr0_spk.clone()),
+            ..Default::default()
         })],
         false,
     ).await?;
@@ -1052,6 +1094,7 @@ async fn run_ptr_tests() -> anyhow::Result<()> {
     it_should_transfer_ptr_with_n_to_n_rule(&rig).await?;
 
     println!("\n=== Running PTR Data Tests ===");
+    it_should_create_ptr_with_data_in_one_tx(&rig).await?;
     it_should_set_and_persist_ptr_data(&rig).await?;
 
     println!("\n=== Running Space Fallback Data Tests ===");
@@ -1106,6 +1149,7 @@ async fn it_should_transfer_foreign_num_with_secret(rig: &TestRig) -> anyhow::Re
     wallet_do(rig, ALICE, vec![
         RpcWalletRequest::CreateNum(CreateNumParams {
             bind_spk: Some(spk.clone()),
+            ..Default::default()
         }),
     ], false).await?;
     mine_and_sync(rig, 1).await?;
@@ -1198,7 +1242,7 @@ async fn it_should_transfer_ptr_with_n_to_n_rule(rig: &TestRig) -> anyhow::Resul
         let addr0 = rig.spaced.client.wallet_get_new_address(ALICE, AddressKind::Coin).await?;
         let addr0_spk = bitcoin::address::Address::from_str(&addr0)?.assume_checked().script_pubkey();
         wallet_do(rig, ALICE, vec![
-            RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: Some(addr0_spk.clone()) })
+            RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: Some(addr0_spk.clone()), ..Default::default() })
         ], false).await?;
         mine_and_sync(rig, 1).await?;
 
@@ -1235,8 +1279,8 @@ async fn it_should_transfer_ptr_with_n_to_n_rule(rig: &TestRig) -> anyhow::Resul
         let spk_b = bitcoin::address::Address::from_str(&addr_b)?.assume_checked().script_pubkey();
 
         wallet_do(rig, ALICE, vec![
-            RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: Some(spk_a.clone()) }),
-            RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: Some(spk_b.clone()) }),
+            RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: Some(spk_a.clone()), ..Default::default() }),
+            RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: Some(spk_b.clone()), ..Default::default() }),
         ], false).await?;
         mine_and_sync(rig, 1).await?;
 
@@ -1325,7 +1369,7 @@ async fn it_should_delegate_and_commit_numeric(rig: &TestRig) -> anyhow::Result<
     let addr = rig.spaced.client.wallet_get_new_address(ALICE, AddressKind::Coin).await?;
     let spk = bitcoin::address::Address::from_str(&addr)?.assume_checked().script_pubkey();
     wallet_do(rig, ALICE, vec![
-        RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: Some(spk.clone()) })
+        RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: Some(spk.clone()), ..Default::default() })
     ], false).await?;
     mine_and_sync(rig, 1).await?;
 
@@ -1417,7 +1461,7 @@ async fn it_should_authorize_numeric_to_another_wallet(rig: &TestRig) -> anyhow:
     // Create a num for Alice
     println!("Test 1: Alice creates and delegates a numeric");
     wallet_do(rig, ALICE, vec![
-        RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: None })
+        RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: None, ..Default::default() })
     ], false).await?;
     mine_and_sync(rig, 1).await?;
 
@@ -1571,8 +1615,8 @@ async fn it_should_create_multiple_nums_same_tx(rig: &TestRig) -> anyhow::Result
     let before_count = before.nums.len();
 
     wallet_do(rig, ALICE, vec![
-        RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: None }),
-        RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: None }),
+        RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: None, ..Default::default() }),
+        RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: None, ..Default::default() }),
     ], false).await?;
     mine_and_sync(rig, 1).await?;
 

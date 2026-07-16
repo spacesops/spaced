@@ -343,7 +343,7 @@ pub fn build_schema() -> Vec<MethodSchema> {
                     "jsonrpc": "2.0", "id": 1,
                     "method": "walletsendrequest",
                     "params": ["default", {
-                        "requests": [{"request": "createnum"}],
+                        "requests": [{"request": "createnum", "bind_spk": "5120aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "data": [72, 101, 108, 108, 111]}],
                         "fee_rate": 1.0,
                         "force": false,
                         "confirmed_only": false,

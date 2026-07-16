@@ -1707,7 +1707,10 @@ impl RpcWallet {
                         return Err(anyhow!("snum already exists"));
                     }
 
-                    builder = builder.add_num(NumRequest { bind_spk: spk })
+                    builder = builder.add_num(NumRequest { bind_spk: spk });
+                    if let Some(data) = params.data {
+                        builder = builder.add_data(data);
+                    }
                 }
                 RpcWalletRequest::Commit(params) => {
                     let reqs = commit_params_to_req(chain, wallet, params)?;

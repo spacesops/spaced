@@ -16,6 +16,7 @@ use jsonrpsee::{
 use spaces_client::{
     auth::{auth_token_from_cookie, auth_token_from_creds, http_client_with_auth},
     config::{default_cookie_path, default_spaces_rpc_port, ExtendedNetwork},
+    fallback_payload::FallbackDataFlags,
     format::{
         print_error_rpc_response, print_list_bidouts, print_list_nums_response,
         print_list_spaces_response, print_list_transactions, print_list_unspent,
@@ -154,13 +155,19 @@ enum Commands {
         #[arg(long)]
         expired: bool,
     },
-    /// Create a new num
+    /// Create a new num.
+    ///
+    /// Optional SIP-7 fallback data can be attached in the same transaction using
+    /// `--txt`, `--addr`, `--blob`, `--raw`, or `--stdin` (same format as `setfallback`).
     #[command(name = "createnum")]
     CreateNum {
         /// Optional script public key as hex string.
         /// If omitted, a unique address is generated automatically.
         #[arg(long)]
         bind_spk: Option<String>,
+
+        #[command(flatten)]
+        fallback: FallbackDataFlags,
 
         #[arg(long, short)]
         fee_rate: Option<u64>,
@@ -382,6 +389,7 @@ enum Commands {
     ///
     /// Examples:
     ///   space-cli setfallback @alice --txt btc=bc1q... --txt nostr=npub1...
+    ///   space-cli setfallback @alice --addr btc=bc1q...,bc1qother
     ///   space-cli setfallback @alice --raw SGVsbG8=
     ///   echo '[{"type":"txt","key":"btc","value":["bc1q..."]}]' | space-cli setfallback @alice --stdin
     ///   space-cli setfallback @alice --txt btc=bc1q... --dry-run
@@ -389,18 +397,10 @@ enum Commands {
     SetFallback {
         /// Space name, numeric, or num id
         subject: Subject,
-        /// Add a TXT record (key=value, can be repeated)
-        #[arg(long = "txt", value_name = "KEY=VALUE")]
-        txt_records: Vec<String>,
-        /// Add a BLOB record (key=base64, can be repeated)
-        #[arg(long = "blob", value_name = "KEY=BASE64")]
-        blob_records: Vec<String>,
-        /// Set raw wire-format data as base64
-        #[arg(long, conflicts_with_all = ["txt_records", "blob_records", "stdin"])]
-        raw: Option<String>,
-        /// Read JSON records from stdin
-        #[arg(long, conflicts_with_all = ["txt_records", "blob_records", "raw"])]
-        stdin: bool,
+
+        #[command(flatten)]
+        fallback: FallbackDataFlags,
+
         /// Fee rate to use in sat/vB
         #[arg(long, short)]
         fee_rate: Option<u64>,
@@ -840,49 +840,11 @@ async fn handle_commands(cli: &SpaceCli, command: Commands) -> Result<(), Client
         }
         Commands::SetFallback {
             subject,
-            txt_records,
-            blob_records,
-            raw,
-            stdin,
+            fallback,
             fee_rate,
             dry_run,
         } => {
-            use base64::Engine;
-            let data = if let Some(raw_b64) = raw {
-                // Raw base64-encoded wire-format bytes
-                base64::engine::general_purpose::STANDARD.decode(&raw_b64)
-                    .map_err(|e| ClientError::Custom(format!("Could not base64 decode data: {}", e)))?
-            } else if stdin {
-                // Read JSON records from stdin
-                let mut input = String::new();
-                io::stdin().read_line(&mut input).map_err(|e|
-                    ClientError::Custom(format!("Failed to read stdin: {}", e)))?;
-                let record_set: sip7::RecordSet = serde_json::from_str(input.trim())
-                    .map_err(|e| ClientError::Custom(format!("Invalid SIP-7 JSON: {}", e)))?;
-                record_set.to_bytes()
-            } else if !txt_records.is_empty() || !blob_records.is_empty() {
-                // Build from --txt and --blob flags
-                let mut records = Vec::new();
-                for txt in &txt_records {
-                    let (key, value) = txt.split_once('=').ok_or_else(||
-                        ClientError::Custom(format!("Invalid --txt format '{}': expected key=value", txt)))?;
-                    records.push(sip7::Record::txt(key, &[value]));
-                }
-                for blob in &blob_records {
-                    let (key, b64_value) = blob.split_once('=').ok_or_else(||
-                        ClientError::Custom(format!("Invalid --blob format '{}': expected key=base64", blob)))?;
-                    let value = base64::engine::general_purpose::STANDARD.decode(b64_value)
-                        .map_err(|e| ClientError::Custom(format!("Invalid base64 in --blob '{}': {}", key, e)))?;
-                    records.push(sip7::Record::blob(key, value));
-                }
-                sip7::RecordSet::pack(records)
-                    .map_err(|e| ClientError::Custom(format!("Invalid record: {}", e)))?
-                    .to_bytes()
-            } else {
-                return Err(ClientError::Custom(
-                    "No data specified. Use --txt, --blob, --raw, or --stdin".to_string()
-                ));
-            };
+            let data = fallback.required_payload().map_err(|e| ClientError::Custom(e.to_string()))?;
 
             if dry_run {
                 println!("{}", hex::encode(&data));
@@ -1103,7 +1065,11 @@ async fn handle_commands(cli: &SpaceCli, command: Commands) -> Result<(), Client
             println!("spk: {}", hex::encode(spk.as_bytes()));
             println!("num_id: {}", num_id);
         }
-        Commands::CreateNum { bind_spk, fee_rate } => {
+        Commands::CreateNum {
+            bind_spk,
+            fallback,
+            fee_rate,
+        } => {
             let spk = match bind_spk {
                 Some(hex) => {
                     let spk = ScriptBuf::from(hex::decode(hex)
@@ -1117,15 +1083,16 @@ async fn handle_commands(cli: &SpaceCli, command: Commands) -> Result<(), Client
                     None
                 }
             };
+            let data = fallback
+                .optional_payload()
+                .map_err(|e| ClientError::Custom(e.to_string()))?;
             cli.send_request(
-                Some(RpcWalletRequest::CreateNum(CreateNumParams {
-                    bind_spk: spk,
-                })),
+                Some(RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: spk, data })),
                 None,
                 fee_rate,
                 false,
             )
-                .await?
+            .await?
         }
         Commands::GetNum { subject } => {
             let num = cli

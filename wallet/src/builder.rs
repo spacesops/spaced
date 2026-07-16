@@ -1320,6 +1320,7 @@ fn create_num_tx(
         .fee_rate(fee_rate);
 
     let has_transfers = !params.transfers.is_empty();
+    let has_binds = !params.binds.is_empty();
 
     // Handle transfers:
     for transfer in params.transfers {
@@ -1371,9 +1372,9 @@ fn create_num_tx(
         builder.add_recipient(num.bind_spk, num_utxo_dust(Amount::from_sat(1000)));
     }
 
-    // Add data OP_RETURN if present (only makes sense with transfers)
+    // Add data OP_RETURN when attaching fallback payload to num creates or transfers.
     if let Some(data) = params.data
-        && has_transfers
+        && (has_transfers || has_binds)
     {
         let script = create_data_script(&data);
         builder.add_recipient(script, Amount::from_sat(0));
