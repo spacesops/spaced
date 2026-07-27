@@ -22,7 +22,7 @@ use spaces_wallet::{
         KeychainKind,
     },
     bitcoin,
-    bitcoin::{secp256k1::schnorr, Address, Amount, FeeRate, OutPoint},
+    bitcoin::{secp256k1::schnorr, Address, Amount, FeeRate, OutPoint, absolute::LockTime},
     builder::{CoinTransfer, SpaceTransfer, SpacesAwareCoinSelection},
     tx_event::{TxEvent, TxEventKind, TxRecord},
     nostr::NostrEvent,
@@ -47,11 +47,12 @@ use crate::{
 };
 use spaces_nums::num_id::{NumId, NumIdParseError, NUM_HRP};
 use spaces_nums::snumeric::SNumeric;
-use spaces_nums::FullNumOut;
-use spaces_nums::{DelegatorKey, NumOut, NumSource};
+use spaces_nums::{DelegatorKey, FullNumOut, NumOut, NumSource, RebindKey};
 use spaces_protocol::bitcoin::address::ParseError;
 use spaces_protocol::bitcoin::{Network, ScriptBuf};
-use spaces_wallet::builder::{CommitmentRequest, NumDelegate, NumRequest, NumTransfer};
+use spaces_wallet::builder::{
+    CommitmentRequest, NumDelegate, NumRequest, NumTransfer, NumUnbind, debug_create_unbind_raw_tx,
+};
 use tabled::Tabled;
 use tokio::{
     select,
@@ -375,6 +376,16 @@ pub enum WalletCommand {
         subject: Subject,
         event: NostrEvent,
         resp: crate::rpc::Responder<anyhow::Result<NostrEvent>>,
+    },
+    /// Regtest-only debug builder for hand-crafted unbind/revive txs.
+    /// Skips the wallet's correctness invariants so tests can drive
+    /// protocol-level edge cases (multi-output destroys, same-tx revive+die).
+    DebugBuildUnbindRaw {
+        num_outpoints: Vec<OutPoint>,
+        extra_outputs: Vec<(ScriptBuf, Amount)>,
+        locktime: Option<u32>,
+        fee_rate: FeeRate,
+        resp: crate::rpc::Responder<anyhow::Result<TxResponse>>,
     },
 }
 
@@ -770,8 +781,71 @@ impl RpcWallet {
             } => {
                 _ = resp.send(wallet.sign_event::<Sha256, _>(chain, subject, event));
             }
+            WalletCommand::DebugBuildUnbindRaw {
+                num_outpoints,
+                extra_outputs,
+                locktime,
+                fee_rate,
+                resp,
+            } => {
+                let result = Self::handle_debug_build_unbind_raw(
+                    source,
+                    chain,
+                    wallet,
+                    num_outpoints,
+                    extra_outputs,
+                    locktime,
+                    fee_rate,
+                );
+                _ = resp.send(result);
+            }
         }
         Ok(())
+    }
+
+    /// Regtest-only: build, sign, and broadcast a hand-crafted unbind/revive
+    /// tx that bypasses the wallet's correctness invariants. Used by tests
+    /// to exercise protocol-level edge cases the high-level builder refuses
+    /// to construct.
+    fn handle_debug_build_unbind_raw(
+        source: &BitcoinBlockSource,
+        chain: &mut Chain,
+        wallet: &mut SpacesWallet,
+        num_outpoints: Vec<OutPoint>,
+        extra_outputs: Vec<(ScriptBuf, Amount)>,
+        locktime: Option<u32>,
+        fee_rate: FeeRate,
+    ) -> anyhow::Result<TxResponse> {
+        let unspendables = wallet.list_spaces_outpoints(chain)?;
+        let lock = locktime
+            .map(LockTime::from_height)
+            .transpose()
+            .map_err(|e| anyhow::anyhow!("invalid locktime height: {}", e))?;
+
+        let tx = debug_create_unbind_raw_tx(
+            wallet,
+            fee_rate,
+            unspendables,
+            false,
+            num_outpoints,
+            extra_outputs,
+            lock,
+        )?;
+
+        let txid = tx.compute_txid();
+        let last_seen = source.rpc.broadcast_tx(&source.client, &tx)?;
+
+        let tx_record = TxRecord::new(tx);
+        let events = tx_record.events.clone();
+        wallet.apply_unconfirmed_tx_record(tx_record, last_seen)?;
+        wallet.commit()?;
+
+        Ok(TxResponse {
+            txid,
+            events,
+            error: None,
+            raw: None,
+        })
     }
 
     /// Check if wallet can operate on a subject by verifying it controls the operator num
@@ -1700,16 +1774,101 @@ impl RpcWallet {
                         Some(spk) => spk,
                         None => advance_address_to_unique_num_spk(chain, wallet)?,
                     };
-                    let snum = NumId::from_spk::<Sha256>(spk.clone());
 
-                    let snum = chain.get_num_info(&snum)?;
-                    if snum.is_some() && !tx.force {
-                        return Err(anyhow!("snum already exists"));
+                    // A rebind parked at the spk means the caller is reviving
+                    // a dormant num -> emit a revival (…88) output. Otherwise
+                    // it's a fresh mint (…77), which consensus skips if an
+                    // identity was ever minted at the spk — reject those
+                    // up-front instead of wasting a tx.
+                    let revive = chain
+                        .get_num_rebind(&RebindKey::from_spk::<Sha256>(spk.clone()))?
+                        .is_some();
+                    if !revive {
+                        let id = NumId::from_spk::<Sha256>(spk.clone());
+                        if chain.get_num_info(&id)?.is_some() && !tx.force {
+                            return Err(anyhow!("snum already exists"));
+                        }
                     }
 
-                    builder = builder.add_num(NumRequest { bind_spk: spk });
+                    builder = builder.add_num(NumRequest {
+                        bind_spk: spk,
+                        revive,
+                    });
                     if let Some(data) = params.data {
                         builder = builder.add_data(data);
+                    }
+                }
+                RpcWalletRequest::Unbind(params) => {
+                    let secret: Option<[u8; 32]> = match &params.secret {
+                        Some(hex) => {
+                            let bytes =
+                                hex::decode(hex).map_err(|_| anyhow!("invalid hex secret key"))?;
+                            if bytes.len() != 32 {
+                                return Err(anyhow!("secret key must be 32 bytes"));
+                            }
+                            let mut arr = [0u8; 32];
+                            arr.copy_from_slice(&bytes);
+                            Some(arr)
+                        }
+                        None => None,
+                    };
+                    for subject in &params.subjects {
+                        let id = match subject {
+                            Subject::NumId(id) => *id,
+                            Subject::Label(label) if label.is_numeric() => {
+                                let numeric: SNumeric = label.clone().try_into().unwrap();
+                                chain.get_num_id(&numeric)?.ok_or_else(|| {
+                                    anyhow!("unbind: numeric '{}' not found", label)
+                                })?
+                            }
+                            Subject::Label(label) => {
+                                return Err(anyhow!(
+                                    "unbind: expected a num, not space '{}'",
+                                    label
+                                ));
+                            }
+                            Subject::Handle(handle) => {
+                                return Err(anyhow!(
+                                    "unbind: expected a num, not handle '{}'",
+                                    handle
+                                ));
+                            }
+                            Subject::HandlePattern(pattern) => {
+                                return Err(anyhow!(
+                                    "unbind: expected a num, not handle pattern '{}'",
+                                    pattern
+                                ));
+                            }
+                        };
+                        let num = match chain.get_num_info(&id)? {
+                            None => return Err(anyhow!("unbind: num '{}' not found", id)),
+                            Some(full) if full.numout.spent => {
+                                return Err(anyhow!("unbind: num '{}' already dormant", id));
+                            }
+                            Some(full)
+                                if secret.is_none()
+                                    && !wallet.is_mine(full.numout.script_pubkey.clone()) =>
+                            {
+                                return Err(anyhow!("unbind: you don't own num '{}'", id));
+                            }
+                            Some(full)
+                                if secret.is_none()
+                                    && wallet
+                                        .get_utxo(OutPoint::new(full.txid, full.numout.n as u32))
+                                        .is_none() =>
+                            {
+                                return Err(anyhow!(
+                                    "unbind '{}': wallet already has a pending tx",
+                                    id
+                                ));
+                            }
+                            Some(full) => full,
+                        };
+                        // Only attach the secret to nums the wallet doesn't own —
+                        // owned nums sign through the wallet as usual.
+                        let secret =
+                            secret.filter(|_| !wallet.is_mine(num.numout.script_pubkey.clone()));
+                        builder = builder.add_num_unbind(NumUnbind { num, secret });
                     }
                 }
                 RpcWalletRequest::Commit(params) => {
@@ -2093,6 +2252,26 @@ impl RpcWallet {
         let (resp, resp_rx) = oneshot::channel();
         self.sender
             .send(WalletCommand::BatchTx { request, resp })
+            .await?;
+        resp_rx.await?
+    }
+
+    pub async fn send_debug_build_unbind_raw(
+        &self,
+        num_outpoints: Vec<OutPoint>,
+        extra_outputs: Vec<(ScriptBuf, Amount)>,
+        locktime: Option<u32>,
+        fee_rate: FeeRate,
+    ) -> anyhow::Result<TxResponse> {
+        let (resp, resp_rx) = oneshot::channel();
+        self.sender
+            .send(WalletCommand::DebugBuildUnbindRaw {
+                num_outpoints,
+                extra_outputs,
+                locktime,
+                fee_rate,
+                resp,
+            })
             .await?;
         resp_rx.await?
     }
