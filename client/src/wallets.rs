@@ -377,6 +377,10 @@ pub enum WalletCommand {
         event: NostrEvent,
         resp: crate::rpc::Responder<anyhow::Result<NostrEvent>>,
     },
+    GetNsec {
+        subject: Subject,
+        resp: crate::rpc::Responder<anyhow::Result<String>>,
+    },
     /// Regtest-only debug builder for hand-crafted unbind/revive txs.
     /// Skips the wallet's correctness invariants so tests can drive
     /// protocol-level edge cases (multi-output destroys, same-tx revive+die).
@@ -780,6 +784,9 @@ impl RpcWallet {
                 resp,
             } => {
                 _ = resp.send(wallet.sign_event::<Sha256, _>(chain, subject, event));
+            }
+            WalletCommand::GetNsec { subject, resp } => {
+                _ = resp.send(wallet.get_nsec::<Sha256, _>(chain, subject));
             }
             WalletCommand::DebugBuildUnbindRaw {
                 num_outpoints,
@@ -2438,6 +2445,14 @@ impl RpcWallet {
                 event,
                 resp,
             })
+            .await?;
+        resp_rx.await?
+    }
+
+    pub async fn send_get_nsec(&self, subject: Subject) -> anyhow::Result<String> {
+        let (resp, resp_rx) = oneshot::channel();
+        self.sender
+            .send(WalletCommand::GetNsec { subject, resp })
             .await?;
         resp_rx.await?
     }

@@ -504,47 +504,77 @@ impl SpacesWallet {
         TxEvent::get_create_num_events(&db_tx).context("could not read create num events")
     }
 
+    fn resolve_subject_outpoint<H: KeyHasher, S: SpacesSource + NumSource>(
+        src: &mut S,
+        subject: &Subject,
+    ) -> anyhow::Result<OutPoint> {
+        match subject {
+            Subject::Label(label) if label.is_numeric() => {
+                let numeric: SNumeric = label.clone().try_into().unwrap();
+                let id = src.get_num_id(&numeric)?
+                    .ok_or_else(|| anyhow::anyhow!("Numeric '{}' not found", numeric))?;
+                src.get_num_outpoint_by_id(&id)?
+                    .ok_or_else(|| anyhow::anyhow!("Num id not found"))
+            }
+            Subject::Label(label) => {
+                let space_key = SpaceKey::from(H::hash(label.as_ref()));
+                src.get_space_outpoint(&space_key)?
+                    .ok_or_else(|| anyhow::anyhow!("Space not found"))
+            }
+            Subject::NumId(id) => {
+                src.get_num_outpoint_by_id(id)?
+                    .ok_or_else(|| anyhow::anyhow!("Num id not found"))
+            }
+            Subject::Handle(_) | Subject::HandlePattern(_) => {
+                Err(anyhow::anyhow!(
+                    "handle subjects are not supported for this operation"
+                ))
+            }
+        }
+    }
+
+    fn taproot_keypair_for_subject<H: KeyHasher, S: SpacesSource + NumSource>(
+        &mut self,
+        src: &mut S,
+        subject: &Subject,
+    ) -> anyhow::Result<TweakedKeypair> {
+        let outpoint = Self::resolve_subject_outpoint::<H, S>(src, subject)?;
+        // We use list_output instead of get_utxo because the output might
+        // be spent in a pending tx, so signatures are still valid until confirmed.
+        let utxo = self
+            .internal
+            .list_output()
+            .find(|o| o.outpoint == outpoint)
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("Not owned by wallet"))?;
+
+        self.get_taproot_keypair(utxo.keychain, utxo.derivation_index)
+            .context("Could not derive taproot keypair to sign message")
+    }
+
+    pub fn get_nsec<H: KeyHasher, S: SpacesSource + NumSource>(
+        &mut self,
+        src: &mut S,
+        subject: Subject,
+    ) -> anyhow::Result<String> {
+        let keypair = self.taproot_keypair_for_subject::<H, S>(src, &subject)?;
+        let secret = keypair.to_keypair().secret_key().secret_bytes();
+        nostr::encode_nsec(&secret)
+    }
+
     pub fn sign_event<H: KeyHasher, S: SpacesSource + NumSource>(
         &mut self,
         src: &mut S,
         subject: Subject,
         mut event: NostrEvent,
     ) -> anyhow::Result<NostrEvent> {
-        let outpoint = match &subject {
-            Subject::Label(label) if label.is_numeric() => {
-                let numeric: SNumeric = label.clone().try_into().unwrap();
-                let id = src.get_num_id(&numeric)?
-                    .ok_or_else(|| anyhow::anyhow!("Numeric '{}' not found", numeric))?;
-                src.get_num_outpoint_by_id(&id)?
-                    .ok_or_else(|| anyhow::anyhow!("Num id not found"))?
+        if let Subject::Label(label) = &subject {
+            if event.space().is_some_and(|s| s != label.to_string()) {
+                return Err(anyhow::anyhow!("Space tag does not match specified space"));
             }
-            Subject::Label(label) => {
-                if event.space().is_some_and(|s| s != label.to_string()) {
-                    return Err(anyhow::anyhow!("Space tag does not match specified space"));
-                }
-                let space_key = SpaceKey::from(H::hash(label.as_ref()));
-                src.get_space_outpoint(&space_key)?
-                    .ok_or_else(|| anyhow::anyhow!("Space not found"))?
-            }
-            Subject::NumId(id) => {
-                src.get_num_outpoint_by_id(id)?
-                    .ok_or_else(|| anyhow::anyhow!("Num id not found"))?
-            }
-            Subject::Handle(_) | Subject::HandlePattern(_) => {
-                return Err(anyhow::anyhow!(
-                    "handle subjects are not supported for this operation"
-                ));
-            }
-        };
+        }
 
-        // We use list_output instead of get_utxo because the output might
-        // be spent in a pending tx, so signatures are still valid until confirmed.
-        let utxo = self.internal.list_output().find(|o| o.outpoint == outpoint)
-            .clone().ok_or_else(|| anyhow::anyhow!("Not owned by wallet"))?;
-
-        let keypair = self
-            .get_taproot_keypair(utxo.keychain, utxo.derivation_index)
-            .context("Could not derive taproot keypair to sign message")?;
+        let keypair = self.taproot_keypair_for_subject::<H, S>(src, &subject)?;
 
         event.sign(secp256k1::Secp256k1::new(), &keypair.to_keypair())?;
         Ok(event)

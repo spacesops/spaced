@@ -444,6 +444,12 @@ enum Commands {
         #[arg(short, long)]
         input: Option<PathBuf>,
     },
+    /// Export the Nostr nsec for the space's signing key (same key used by signevent)
+    #[command(name = "getnsec")]
+    GetNsec {
+        /// Space name (e.g., @example)
+        space: String,
+    },
     /// Verify a signed Nostr event against the space's or numeric's public key
     #[command(name = "verifyevent")]
     VerifyEvent {
@@ -895,6 +901,16 @@ async fn handle_commands(cli: &SpaceCli, command: Commands) -> Result<(), Client
                 .wallet_sign_event(&cli.wallet, subject, event)
                 .await?;
             println!("{}", serde_json::to_string(&result).expect("result"));
+        }
+        Commands::GetNsec { mut space } => {
+            space = normalize_space(&space);
+            let subject = Subject::from_str(&space)
+                .map_err(|e| ClientError::Custom(e.to_string()))?;
+            let nsec = cli
+                .client
+                .wallet_get_nsec(&cli.wallet, subject)
+                .await?;
+            println!("{nsec}");
         }
         Commands::VerifyEvent { mut space, input } => {
             let event = read_event(input)

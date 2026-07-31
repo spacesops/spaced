@@ -381,6 +381,13 @@ pub trait Rpc {
         event: NostrEvent,
     ) -> Result<NostrEvent, ErrorObjectOwned>;
 
+    #[method(name = "walletgetnsec")]
+    async fn wallet_get_nsec(
+        &self,
+        wallet: &str,
+        subject: Subject,
+    ) -> Result<String, ErrorObjectOwned>;
+
     #[method(name = "verifyevent")]
     async fn verify_event(
         &self,
@@ -1370,6 +1377,18 @@ impl RpcServer for RpcServerImpl {
         self.wallet(&wallet)
             .await?
             .send_sign_event(subject, event)
+            .await
+            .map_err(|error| ErrorObjectOwned::owned(-1, error.to_string(), None::<String>))
+    }
+
+    async fn wallet_get_nsec(
+        &self,
+        wallet: &str,
+        subject: Subject,
+    ) -> Result<String, ErrorObjectOwned> {
+        self.wallet(&wallet)
+            .await?
+            .send_get_nsec(subject)
             .await
             .map_err(|error| ErrorObjectOwned::owned(-1, error.to_string(), None::<String>))
     }
