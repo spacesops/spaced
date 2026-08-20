@@ -455,11 +455,15 @@ pub trait Rpc {
         skip_tx_check: bool,
     ) -> Result<Vec<TxResponse>, ErrorObjectOwned>;
 
+    /// Buy a listed space or num. `recipient` optionally delivers the subject
+    /// to an external address (e.g. another keystore); when omitted it goes to
+    /// a fresh address of the funding wallet.
     #[method(name = "walletbuy")]
     async fn wallet_buy(
         &self,
         wallet: &str,
         listing: Listing,
+        recipient: Option<String>,
         fee_rate: Option<FeeRate>,
         skip_tx_check: bool,
     ) -> Result<TxResponse, ErrorObjectOwned>;
@@ -471,6 +475,17 @@ pub trait Rpc {
         space: String,
         amount: u64,
     ) -> Result<Listing, ErrorObjectOwned>;
+
+    /// Fund and broadcast one or more externally-signed transfer PSBTs
+    /// (single input/output, SIGHASH_SINGLE|ANYONECANPAY, value in == value
+    /// out) as a single transaction. The wallet supplies fee + change.
+    #[method(name = "walletfundtransfer")]
+    async fn wallet_fund_transfer(
+        &self,
+        wallet: &str,
+        psbts: Vec<String>,
+        fee_rate: Option<FeeRate>,
+    ) -> Result<TxResponse, ErrorObjectOwned>;
 
     #[method(name = "verifylisting")]
     async fn verify_listing(&self, listing: Listing) -> Result<(), ErrorObjectOwned>;
@@ -560,6 +575,17 @@ pub trait Rpc {
         locktime: Option<u32>,
         fee_rate: FeeRate,
     ) -> Result<TxResponse, ErrorObjectOwned>;
+
+    /// Debug: produce a value-preserving num transfer PSBT (single input/output,
+    /// SIGHASH_SINGLE|ANYONECANPAY) for one of the wallet's nums, to be funded
+    /// via `walletfundtransfer`. Returns the base64 PSBT. Regtest only.
+    #[method(name = "debugsigntransfer")]
+    async fn debug_sign_transfer(
+        &self,
+        wallet: &str,
+        subject: String,
+        recipient: ScriptBuf,
+    ) -> Result<String, ErrorObjectOwned>;
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -1595,12 +1621,13 @@ impl RpcServer for RpcServerImpl {
         &self,
         wallet: &str,
         listing: Listing,
+        recipient: Option<String>,
         fee_rate: Option<FeeRate>,
         skip_tx_check: bool,
     ) -> Result<TxResponse, ErrorObjectOwned> {
         self.wallet(&wallet)
             .await?
-            .send_buy(listing, fee_rate, skip_tx_check)
+            .send_buy(listing, recipient, fee_rate, skip_tx_check)
             .await
             .map_err(|error| ErrorObjectOwned::owned(-1, error.to_string(), None::<String>))
     }
@@ -1614,6 +1641,19 @@ impl RpcServer for RpcServerImpl {
         self.wallet(&wallet)
             .await?
             .send_sell(space, amount)
+            .await
+            .map_err(|error| ErrorObjectOwned::owned(-1, error.to_string(), None::<String>))
+    }
+
+    async fn wallet_fund_transfer(
+        &self,
+        wallet: &str,
+        psbts: Vec<String>,
+        fee_rate: Option<FeeRate>,
+    ) -> Result<TxResponse, ErrorObjectOwned> {
+        self.wallet(wallet)
+            .await?
+            .send_fund_transfer(psbts, fee_rate)
             .await
             .map_err(|error| ErrorObjectOwned::owned(-1, error.to_string(), None::<String>))
     }
@@ -1892,6 +1932,31 @@ impl RpcServer for RpcServerImpl {
         self.wallet(wallet)
             .await?
             .send_debug_build_unbind_raw(num_outpoints, extras, locktime, fee_rate)
+            .await
+            .map_err(|error| ErrorObjectOwned::owned(-1, error.to_string(), None::<String>))
+    }
+
+    async fn debug_sign_transfer(
+        &self,
+        wallet: &str,
+        subject: String,
+        recipient: ScriptBuf,
+    ) -> Result<String, ErrorObjectOwned> {
+        let info = self
+            .store
+            .get_server_info()
+            .await
+            .map_err(|e| ErrorObjectOwned::owned(-1, e.to_string(), None::<String>))?;
+        if info.network != ExtendedNetwork::Regtest {
+            return Err(ErrorObjectOwned::owned(
+                -1,
+                "debug_sign_transfer is only available on regtest",
+                None::<String>,
+            ));
+        }
+        self.wallet(wallet)
+            .await?
+            .send_debug_sign_transfer(subject, recipient)
             .await
             .map_err(|error| ErrorObjectOwned::owned(-1, error.to_string(), None::<String>))
     }

@@ -1,6 +1,6 @@
 use schemars::schema_for;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::rpc::*;
 use crate::wallets::*;
@@ -26,12 +26,34 @@ pub struct MethodSchema {
     pub extra_examples: Vec<(&'static str, Value)>,
 }
 
-fn param(name: &'static str, r#type: &'static str, description: &'static str, example: Value) -> ParamInfo {
-    ParamInfo { name, description, r#type, required: true, example }
+fn param(
+    name: &'static str,
+    r#type: &'static str,
+    description: &'static str,
+    example: Value,
+) -> ParamInfo {
+    ParamInfo {
+        name,
+        description,
+        r#type,
+        required: true,
+        example,
+    }
 }
 
-fn opt_param(name: &'static str, r#type: &'static str, description: &'static str, example: Value) -> ParamInfo {
-    ParamInfo { name, description, r#type, required: false, example }
+fn opt_param(
+    name: &'static str,
+    r#type: &'static str,
+    description: &'static str,
+    example: Value,
+) -> ParamInfo {
+    ParamInfo {
+        name,
+        description,
+        r#type,
+        required: false,
+        example,
+    }
 }
 
 fn rpc_request(method: &str, params: &[&ParamInfo]) -> Value {
@@ -59,7 +81,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
         MethodSchema {
             name: "getspace",
             description: "Get full space output by space name or hash",
-            params: vec![param("space_or_hash", "string", "Space name (e.g. \"@example\") or hex hash", json!("@example"))],
+            params: vec![param(
+                "space_or_hash",
+                "string",
+                "Space name (e.g. \"@example\") or hex hash",
+                json!("@example"),
+            )],
             result_type: "Option<FullSpaceOut>",
             result_schema: None,
             extra_examples: vec![],
@@ -67,7 +94,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
         MethodSchema {
             name: "getspaceowner",
             description: "Get the outpoint that owns a space",
-            params: vec![param("space_or_hash", "string", "Space name (e.g. \"@example\") or hex hash", json!("@example"))],
+            params: vec![param(
+                "space_or_hash",
+                "string",
+                "Space name (e.g. \"@example\") or hex hash",
+                json!("@example"),
+            )],
             result_type: "Option<OutPoint>",
             result_schema: None,
             extra_examples: vec![],
@@ -75,7 +107,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
         MethodSchema {
             name: "getspaceout",
             description: "Get a space output by outpoint",
-            params: vec![param("outpoint", "OutPoint", "Transaction outpoint (txid:vout)", json!("a]1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d:0"))],
+            params: vec![param(
+                "outpoint",
+                "OutPoint",
+                "Transaction outpoint (txid:vout)",
+                json!("a]1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d:0"),
+            )],
             result_type: "Option<SpaceOut>",
             result_schema: None,
             extra_examples: vec![],
@@ -84,7 +121,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
         MethodSchema {
             name: "getnum",
             description: "Get full num output by numeric id or num id",
-            params: vec![param("subject", "Subject", "#numeric or num1... id", json!("#1-2-3"))],
+            params: vec![param(
+                "subject",
+                "Subject",
+                "#numeric or num1... id",
+                json!("#1-2-3"),
+            )],
             result_type: "Option<FullNumOut>",
             result_schema: None,
             extra_examples: vec![],
@@ -92,7 +134,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
         MethodSchema {
             name: "getnumowner",
             description: "Get the outpoint that owns a num",
-            params: vec![param("subject", "Subject", "#numeric or num1... id", json!("#1-2-3"))],
+            params: vec![param(
+                "subject",
+                "Subject",
+                "#numeric or num1... id",
+                json!("#1-2-3"),
+            )],
             result_type: "Option<OutPoint>",
             result_schema: None,
             extra_examples: vec![],
@@ -100,8 +147,27 @@ pub fn build_schema() -> Vec<MethodSchema> {
         MethodSchema {
             name: "getnumout",
             description: "Get a num output by outpoint",
-            params: vec![param("outpoint", "OutPoint", "Transaction outpoint (txid:vout)", json!("a]1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d:0"))],
+            params: vec![param(
+                "outpoint",
+                "OutPoint",
+                "Transaction outpoint (txid:vout)",
+                json!("a]1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d:0"),
+            )],
             result_type: "Option<NumOut>",
+            result_schema: None,
+            extra_examples: vec![],
+        },
+        MethodSchema {
+            name: "getrebind",
+            description: "Get the rebind parked at a script pubkey (a num that died \
+                          there and can be revived with a `…88` output), if any",
+            params: vec![param(
+                "script_pubkey",
+                "string",
+                "Script pubkey (hex)",
+                json!("5120..."),
+            )],
+            result_type: "Option<RebindData>",
             result_schema: None,
             extra_examples: vec![],
         },
@@ -123,8 +189,18 @@ pub fn build_schema() -> Vec<MethodSchema> {
             name: "getcommitment",
             description: "Get commitment for a subject, optionally at a specific root",
             params: vec![
-                param("subject", "Subject", "@space, #numeric, or num1... id", json!("@example")),
-                opt_param("root", "string", "Specific commitment root hash", json!(null)),
+                param(
+                    "subject",
+                    "Subject",
+                    "@space, #numeric, or num1... id",
+                    json!("@example"),
+                ),
+                opt_param(
+                    "root",
+                    "string",
+                    "Specific commitment root hash",
+                    json!(null),
+                ),
             ],
             result_type: "Option<Commitment>",
             result_schema: None,
@@ -133,7 +209,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
         MethodSchema {
             name: "getdelegation",
             description: "Get the operator num id delegated for a subject",
-            params: vec![param("subject", "Subject", "@space, #numeric, or num1... id", json!("@example"))],
+            params: vec![param(
+                "subject",
+                "Subject",
+                "@space, #numeric, or num1... id",
+                json!("@example"),
+            )],
             result_type: "Option<NumId>",
             result_schema: None,
             extra_examples: vec![],
@@ -141,7 +222,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
         MethodSchema {
             name: "getdelegator",
             description: "Get the subject that a num is operating for",
-            params: vec![param("subject", "Subject", "#numeric or num1... id of the operator", json!("num1qp..."))],
+            params: vec![param(
+                "subject",
+                "Subject",
+                "#numeric or num1... id of the operator",
+                json!("num1qp..."),
+            )],
             result_type: "Option<SLabel>",
             result_schema: None,
             extra_examples: vec![],
@@ -150,7 +236,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
         MethodSchema {
             name: "checkpackage",
             description: "Simulate a package of transactions and return their changesets",
-            params: vec![param("txs", "string[]", "Array of raw transaction hex strings", json!(["0200000001..."]))],
+            params: vec![param(
+                "txs",
+                "string[]",
+                "Array of raw transaction hex strings",
+                json!(["0200000001..."]),
+            )],
             result_type: "Vec<Option<TxChangeSet>>",
             result_schema: None,
             extra_examples: vec![],
@@ -158,7 +249,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
         MethodSchema {
             name: "estimatebid",
             description: "Estimate the minimum bid amount to enter a rollout at the given target",
-            params: vec![param("target", "integer", "Target number of blocks ahead", json!(10))],
+            params: vec![param(
+                "target",
+                "integer",
+                "Target number of blocks ahead",
+                json!(10),
+            )],
             result_type: "u64",
             result_schema: None,
             extra_examples: vec![],
@@ -166,7 +262,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
         MethodSchema {
             name: "getrollout",
             description: "Get the rollout entries for a given target",
-            params: vec![param("target", "integer", "Target number of blocks ahead", json!(10))],
+            params: vec![param(
+                "target",
+                "integer",
+                "Target number of blocks ahead",
+                json!(10),
+            )],
             result_type: "Vec<RolloutEntry>",
             result_schema: None,
             extra_examples: vec![],
@@ -174,7 +275,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
         MethodSchema {
             name: "getblockmeta",
             description: "Get spaces block metadata by height or hash",
-            params: vec![param("height_or_hash", "integer|string", "Block height or block hash", json!(100))],
+            params: vec![param(
+                "height_or_hash",
+                "integer|string",
+                "Block height or block hash",
+                json!(100),
+            )],
             result_type: "BlockMetaWithHash",
             result_schema: Some(serde_json::to_value(schema_for!(BlockMetaWithHash)).unwrap()),
             extra_examples: vec![],
@@ -182,7 +288,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
         MethodSchema {
             name: "getnumblockmeta",
             description: "Get nums block metadata by height or hash",
-            params: vec![param("height_or_hash", "integer|string", "Block height or block hash", json!(100))],
+            params: vec![param(
+                "height_or_hash",
+                "integer|string",
+                "Block height or block hash",
+                json!(100),
+            )],
             result_type: "NumBlockMetaWithHash",
             result_schema: Some(serde_json::to_value(schema_for!(NumBlockMetaWithHash)).unwrap()),
             extra_examples: vec![],
@@ -190,7 +301,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
         MethodSchema {
             name: "gettxmeta",
             description: "Get transaction metadata by txid",
-            params: vec![param("txid", "string", "Transaction id", json!("a]1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d"))],
+            params: vec![param(
+                "txid",
+                "string",
+                "Transaction id",
+                json!("a]1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d"),
+            )],
             result_type: "Option<TxEntry>",
             result_schema: None,
             extra_examples: vec![],
@@ -215,7 +331,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
         MethodSchema {
             name: "walletimport",
             description: "Import a wallet from an export object",
-            params: vec![param("wallet", "WalletExport", "Wallet export data", json!({"descriptor": "...", "blockheight": 0, "label": "default"}))],
+            params: vec![param(
+                "wallet",
+                "WalletExport",
+                "Wallet export data",
+                json!({"descriptor": "...", "blockheight": 0, "label": "default"}),
+            )],
             result_type: "()",
             result_schema: None,
             extra_examples: vec![],
@@ -225,7 +346,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
             description: "Check if a wallet controls the operator num for a subject",
             params: vec![
                 param("wallet", "string", "Wallet name", json!("default")),
-                param("subject", "Subject", "@space, #numeric, or num1... id", json!("@example")),
+                param(
+                    "subject",
+                    "Subject",
+                    "@space, #numeric, or num1... id",
+                    json!("@example"),
+                ),
             ],
             result_type: "bool",
             result_schema: None,
@@ -236,8 +362,18 @@ pub fn build_schema() -> Vec<MethodSchema> {
             description: "Sign a message with a subject's schnorr key",
             params: vec![
                 param("wallet", "string", "Wallet name", json!("default")),
-                param("subject", "Subject", "@space, #numeric, or num1... id", json!("@example")),
-                param("message", "string", "Message bytes (hex)", json!("48656c6c6f")),
+                param(
+                    "subject",
+                    "Subject",
+                    "@space, #numeric, or num1... id",
+                    json!("@example"),
+                ),
+                param(
+                    "message",
+                    "string",
+                    "Message bytes (hex)",
+                    json!("48656c6c6f"),
+                ),
             ],
             result_type: "string",
             result_schema: None,
@@ -247,9 +383,24 @@ pub fn build_schema() -> Vec<MethodSchema> {
             name: "verifyschnorr",
             description: "Verify a schnorr signature for a subject",
             params: vec![
-                param("subject", "Subject", "@space, #numeric, or num1... id", json!("@example")),
-                param("message", "string", "Message bytes (hex)", json!("48656c6c6f")),
-                param("signature", "string", "Signature bytes (hex)", json!("aabbccdd...")),
+                param(
+                    "subject",
+                    "Subject",
+                    "@space, #numeric, or num1... id",
+                    json!("@example"),
+                ),
+                param(
+                    "message",
+                    "string",
+                    "Message bytes (hex)",
+                    json!("48656c6c6f"),
+                ),
+                param(
+                    "signature",
+                    "string",
+                    "Signature bytes (hex)",
+                    json!("aabbccdd..."),
+                ),
             ],
             result_type: "bool",
             result_schema: None,
@@ -284,7 +435,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
             description: "Recover a wallet from a mnemonic phrase",
             params: vec![
                 param("name", "string", "Wallet name", json!("default")),
-                param("mnemonic", "string", "BIP-39 mnemonic phrase", json!("abandon abandon abandon ... about")),
+                param(
+                    "mnemonic",
+                    "string",
+                    "BIP-39 mnemonic phrase",
+                    json!("abandon abandon abandon ... about"),
+                ),
             ],
             result_type: "()",
             result_schema: None,
@@ -295,116 +451,163 @@ pub fn build_schema() -> Vec<MethodSchema> {
             description: "Send a batch of wallet requests (open, bid, register, transfer, etc.)",
             params: vec![
                 param("wallet", "string", "Wallet name", json!("default")),
-                param("request", "RpcWalletTxBuilder", "Transaction builder with requests", json!({
-                    "requests": [{"request": "open", "name": "@example", "amount": 1000}],
-                    "fee_rate": 1.0,
-                    "force": false,
-                    "confirmed_only": false,
-                    "skip_tx_check": false,
-                })),
+                param(
+                    "request",
+                    "RpcWalletTxBuilder",
+                    "Transaction builder with requests",
+                    json!({
+                        "requests": [{"request": "open", "name": "@example", "amount": 1000}],
+                        "fee_rate": 1.0,
+                        "force": false,
+                        "confirmed_only": false,
+                        "skip_tx_check": false,
+                    }),
+                ),
             ],
             result_type: "WalletResponse",
-            result_schema: Some(serde_json::to_value(schema_for!(WalletResponse)).unwrap()),
+            result_schema: Some(serde_json::to_value(schema_for!(RpcWalletTxBuilder)).unwrap()),
             extra_examples: vec![
-                ("Bid on a space", json!({
-                    "jsonrpc": "2.0", "id": 1,
-                    "method": "walletsendrequest",
-                    "params": ["default", {
-                        "requests": [{"request": "bid", "name": "@example", "amount": 2000}],
-                        "fee_rate": 1.0,
-                        "force": false,
-                        "confirmed_only": false,
-                        "skip_tx_check": false,
-                    }]
-                })),
-                ("Register a space", json!({
-                    "jsonrpc": "2.0", "id": 1,
-                    "method": "walletsendrequest",
-                    "params": ["default", {
-                        "requests": [{"request": "register", "name": "@example"}],
-                        "fee_rate": 1.0,
-                        "force": false,
-                        "confirmed_only": false,
-                        "skip_tx_check": false,
-                    }]
-                })),
-                ("Transfer spaces", json!({
-                    "jsonrpc": "2.0", "id": 1,
-                    "method": "walletsendrequest",
-                    "params": ["default", {
-                        "requests": [{"request": "transfer", "spaces": ["@example"], "to": "bc1q..."}],
-                        "fee_rate": 1.0,
-                        "force": false,
-                        "confirmed_only": false,
-                        "skip_tx_check": false,
-                    }]
-                })),
-                ("Create a num", json!({
-                    "jsonrpc": "2.0", "id": 1,
-                    "method": "walletsendrequest",
-                    "params": ["default", {
-                        "requests": [{"request": "createnum", "bind_spk": "5120aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "data": [72, 101, 108, 108, 111]}],
-                        "fee_rate": 1.0,
-                        "force": false,
-                        "confirmed_only": false,
-                        "skip_tx_check": false,
-                    }]
-                })),
-                ("Set up an operator for a space", json!({
-                    "jsonrpc": "2.0", "id": 1,
-                    "method": "walletsendrequest",
-                    "params": ["default", {
-                        "requests": [{"request": "operate", "subject": "@example"}],
-                        "fee_rate": 1.0,
-                        "force": false,
-                        "confirmed_only": false,
-                        "skip_tx_check": false,
-                    }]
-                })),
-                ("Commit a root hash", json!({
-                    "jsonrpc": "2.0", "id": 1,
-                    "method": "walletsendrequest",
-                    "params": ["default", {
-                        "requests": [{"request": "commit", "subject": "@example", "root": "a]1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d"}],
-                        "fee_rate": 1.0,
-                        "force": false,
-                        "confirmed_only": false,
-                        "skip_tx_check": false,
-                    }]
-                })),
-                ("Delegate operator to another wallet", json!({
-                    "jsonrpc": "2.0", "id": 1,
-                    "method": "walletsendrequest",
-                    "params": ["default", {
-                        "requests": [{"request": "delegate", "subject": "@example", "to": "bc1q..."}],
-                        "fee_rate": 1.0,
-                        "force": false,
-                        "confirmed_only": false,
-                        "skip_tx_check": false,
-                    }]
-                })),
-                ("Set fallback data", json!({
-                    "jsonrpc": "2.0", "id": 1,
-                    "method": "walletsendrequest",
-                    "params": ["default", {
-                        "requests": [{"request": "setfallback", "subject": "@example", "data": [0, 1, 2]}],
-                        "fee_rate": 1.0,
-                        "force": false,
-                        "confirmed_only": false,
-                        "skip_tx_check": false,
-                    }]
-                })),
-                ("Send coins", json!({
-                    "jsonrpc": "2.0", "id": 1,
-                    "method": "walletsendrequest",
-                    "params": ["default", {
-                        "requests": [{"request": "send", "amount": 50000, "to": "bc1q..."}],
-                        "fee_rate": 1.0,
-                        "force": false,
-                        "confirmed_only": false,
-                        "skip_tx_check": false,
-                    }]
-                })),
+                (
+                    "Bid on a space",
+                    json!({
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "walletsendrequest",
+                        "params": ["default", {
+                            "requests": [{"request": "bid", "name": "@example", "amount": 2000}],
+                            "fee_rate": 1.0,
+                            "force": false,
+                            "confirmed_only": false,
+                            "skip_tx_check": false,
+                        }]
+                    }),
+                ),
+                (
+                    "Register a space",
+                    json!({
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "walletsendrequest",
+                        "params": ["default", {
+                            "requests": [{"request": "register", "name": "@example"}],
+                            "fee_rate": 1.0,
+                            "force": false,
+                            "confirmed_only": false,
+                            "skip_tx_check": false,
+                        }]
+                    }),
+                ),
+                (
+                    "Transfer spaces",
+                    json!({
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "walletsendrequest",
+                        "params": ["default", {
+                            "requests": [{"request": "transfer", "spaces": ["@example"], "to": "bc1q..."}],
+                            "fee_rate": 1.0,
+                            "force": false,
+                            "confirmed_only": false,
+                            "skip_tx_check": false,
+                        }]
+                    }),
+                ),
+                (
+                    "Create a num",
+                    json!({
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "walletsendrequest",
+                        "params": ["default", {
+                            "requests": [{"request": "createnum"}],
+                            "fee_rate": 1.0,
+                            "force": false,
+                            "confirmed_only": false,
+                            "skip_tx_check": false,
+                        }]
+                    }),
+                ),
+                (
+                    "Unbind a num (make it dormant / revivable at its death spk). \
+                     Pass an optional hex `secret` to unbind a num not owned by the wallet.",
+                    json!({
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "walletsendrequest",
+                        "params": ["default", {
+                            "requests": [{"request": "unbind", "subjects": ["num1..."]}],
+                            "fee_rate": 1.0,
+                            "force": false,
+                            "confirmed_only": false,
+                            "skip_tx_check": false,
+                        }]
+                    }),
+                ),
+                (
+                    "Set up an operator for a space",
+                    json!({
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "walletsendrequest",
+                        "params": ["default", {
+                            "requests": [{"request": "operate", "subject": "@example"}],
+                            "fee_rate": 1.0,
+                            "force": false,
+                            "confirmed_only": false,
+                            "skip_tx_check": false,
+                        }]
+                    }),
+                ),
+                (
+                    "Commit a root hash",
+                    json!({
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "walletsendrequest",
+                        "params": ["default", {
+                            "requests": [{"request": "commit", "subject": "@example", "root": "a]1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d"}],
+                            "fee_rate": 1.0,
+                            "force": false,
+                            "confirmed_only": false,
+                            "skip_tx_check": false,
+                        }]
+                    }),
+                ),
+                (
+                    "Delegate operator to another wallet",
+                    json!({
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "walletsendrequest",
+                        "params": ["default", {
+                            "requests": [{"request": "delegate", "subject": "@example", "to": "bc1q..."}],
+                            "fee_rate": 1.0,
+                            "force": false,
+                            "confirmed_only": false,
+                            "skip_tx_check": false,
+                        }]
+                    }),
+                ),
+                (
+                    "Set fallback data",
+                    json!({
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "walletsendrequest",
+                        "params": ["default", {
+                            "requests": [{"request": "setfallback", "subject": "@example", "data": [0, 1, 2]}],
+                            "fee_rate": 1.0,
+                            "force": false,
+                            "confirmed_only": false,
+                            "skip_tx_check": false,
+                        }]
+                    }),
+                ),
+                (
+                    "Send coins",
+                    json!({
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "walletsendrequest",
+                        "params": ["default", {
+                            "requests": [{"request": "send", "amount": 50000, "to": "bc1q..."}],
+                            "fee_rate": 1.0,
+                            "force": false,
+                            "confirmed_only": false,
+                            "skip_tx_check": false,
+                        }]
+                    }),
+                ),
             ],
         },
         MethodSchema {
@@ -446,7 +649,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
             description: "Get a new address from the wallet",
             params: vec![
                 param("wallet", "string", "Wallet name", json!("default")),
-                param("kind", "AddressKind", "\"Coin\" or \"Space\"", json!("Coin")),
+                param(
+                    "kind",
+                    "AddressKind",
+                    "\"Coin\" or \"Space\"",
+                    json!("Coin"),
+                ),
             ],
             result_type: "string",
             result_schema: None,
@@ -457,7 +665,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
             description: "Increment and return the next address from the wallet",
             params: vec![
                 param("wallet", "string", "Wallet name", json!("default")),
-                param("kind", "AddressKind", "\"Coin\" or \"Space\"", json!("Coin")),
+                param(
+                    "kind",
+                    "AddressKind",
+                    "\"Coin\" or \"Space\"",
+                    json!("Coin"),
+                ),
             ],
             result_type: "string",
             result_schema: None,
@@ -468,9 +681,19 @@ pub fn build_schema() -> Vec<MethodSchema> {
             description: "Bump the fee of an existing transaction",
             params: vec![
                 param("wallet", "string", "Wallet name", json!("default")),
-                param("txid", "string", "Transaction id to bump", json!("a]1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d")),
+                param(
+                    "txid",
+                    "string",
+                    "Transaction id to bump",
+                    json!("a]1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d"),
+                ),
                 param("fee_rate", "number", "New fee rate in sat/vB", json!(2.0)),
-                param("skip_tx_check", "bool", "Skip transaction validation", json!(false)),
+                param(
+                    "skip_tx_check",
+                    "bool",
+                    "Skip transaction validation",
+                    json!(false),
+                ),
             ],
             result_type: "Vec<TxResponse>",
             result_schema: Some(serde_json::to_value(schema_for!(TxResponse)).unwrap()),
@@ -478,12 +701,29 @@ pub fn build_schema() -> Vec<MethodSchema> {
         },
         MethodSchema {
             name: "walletbuy",
-            description: "Buy a space from a listing",
+            description: "Buy a listed space or num. Optionally deliver it to an \
+                          external recipient address instead of this wallet.",
             params: vec![
                 param("wallet", "string", "Wallet name", json!("default")),
-                param("listing", "Listing", "The listing to buy", json!({"space": "@example", "price": 100000, "seller_psbt": "..."})),
+                param(
+                    "listing",
+                    "Listing",
+                    "The listing to buy",
+                    json!({"subject": "@example", "price": 100000, "seller": "bcrt1p...", "signature": "hex..."}),
+                ),
+                opt_param(
+                    "recipient",
+                    "string",
+                    "Address to deliver the space/num to (defaults to a fresh wallet address)",
+                    json!("bcrt1p..."),
+                ),
                 opt_param("fee_rate", "number", "Fee rate in sat/vB", json!(1.0)),
-                param("skip_tx_check", "bool", "Skip transaction validation", json!(false)),
+                param(
+                    "skip_tx_check",
+                    "bool",
+                    "Skip transaction validation",
+                    json!(false),
+                ),
             ],
             result_type: "TxResponse",
             result_schema: Some(serde_json::to_value(schema_for!(TxResponse)).unwrap()),
@@ -491,20 +731,55 @@ pub fn build_schema() -> Vec<MethodSchema> {
         },
         MethodSchema {
             name: "walletsell",
-            description: "Create a listing to sell a space",
+            description: "Create a listing to sell a space or num",
             params: vec![
                 param("wallet", "string", "Wallet name", json!("default")),
-                param("space", "string", "Space name", json!("@example")),
-                param("amount", "integer", "Asking price in satoshis", json!(100000)),
+                param(
+                    "subject",
+                    "string",
+                    "Space (@bitcoin), numeric (#800000-3-1), or num id (num1...)",
+                    json!("@example"),
+                ),
+                param(
+                    "amount",
+                    "integer",
+                    "Asking price in satoshis",
+                    json!(100000),
+                ),
             ],
             result_type: "Listing",
             result_schema: None,
             extra_examples: vec![],
         },
         MethodSchema {
+            name: "walletfundtransfer",
+            description: "Fund and broadcast one or more externally-signed transfer \
+                          PSBTs (single input/output, SIGHASH_SINGLE|ANYONECANPAY, \
+                          input value == output value) as a single transaction. The \
+                          wallet supplies fee inputs and change.",
+            params: vec![
+                param("wallet", "string", "Wallet name", json!("default")),
+                param(
+                    "psbts",
+                    "array<string>",
+                    "Base64-encoded transfer PSBT(s) to batch into one tx",
+                    json!(["cHNidP8B..."]),
+                ),
+                opt_param("fee_rate", "number", "Fee rate in sat/vB", json!(1.0)),
+            ],
+            result_type: "TxResponse",
+            result_schema: Some(serde_json::to_value(schema_for!(TxResponse)).unwrap()),
+            extra_examples: vec![],
+        },
+        MethodSchema {
             name: "verifylisting",
             description: "Verify that a listing is valid",
-            params: vec![param("listing", "Listing", "The listing to verify", json!({"space": "@example", "price": 100000, "seller_psbt": "..."}))],
+            params: vec![param(
+                "listing",
+                "Listing",
+                "The listing to verify",
+                json!({"subject": "@example", "price": 100000, "seller": "bcrt1p...", "signature": "hex..."}),
+            )],
             result_type: "()",
             result_schema: None,
             extra_examples: vec![],
@@ -513,8 +788,18 @@ pub fn build_schema() -> Vec<MethodSchema> {
             name: "buildchainproof",
             description: "Build a chain proof for verifying spaces/nums state",
             params: vec![
-                param("request", "ChainProofRequest", "The proof request specifying keys to prove", json!({"keys": [{"space": "@example"}]})),
-                opt_param("prefer_recent", "bool", "Prefer the most recent snapshot", json!(true)),
+                param(
+                    "request",
+                    "ChainProofRequest",
+                    "The proof request specifying keys to prove",
+                    json!({"keys": [{"space": "@example"}]}),
+                ),
+                opt_param(
+                    "prefer_recent",
+                    "bool",
+                    "Prefer the most recent snapshot",
+                    json!(true),
+                ),
             ],
             result_type: "ChainProofResult",
             result_schema: Some(serde_json::to_value(schema_for!(ChainProofResult)).unwrap()),
@@ -533,8 +818,18 @@ pub fn build_schema() -> Vec<MethodSchema> {
             description: "List wallet transactions with pagination",
             params: vec![
                 param("wallet", "string", "Wallet name", json!("default")),
-                param("count", "integer", "Number of transactions to return", json!(10)),
-                param("skip", "integer", "Number of transactions to skip", json!(0)),
+                param(
+                    "count",
+                    "integer",
+                    "Number of transactions to return",
+                    json!(10),
+                ),
+                param(
+                    "skip",
+                    "integer",
+                    "Number of transactions to skip",
+                    json!(0),
+                ),
             ],
             result_type: "Vec<TxInfo>",
             result_schema: Some(serde_json::to_value(schema_for!(TxInfo)).unwrap()),
@@ -545,7 +840,12 @@ pub fn build_schema() -> Vec<MethodSchema> {
             description: "Force spend a specific outpoint",
             params: vec![
                 param("wallet", "string", "Wallet name", json!("default")),
-                param("outpoint", "OutPoint", "Transaction outpoint (txid:vout)", json!("a]1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d:0")),
+                param(
+                    "outpoint",
+                    "OutPoint",
+                    "Transaction outpoint (txid:vout)",
+                    json!("a]1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d:0"),
+                ),
                 param("fee_rate", "number", "Fee rate in sat/vB", json!(1.0)),
             ],
             result_type: "TxResponse",
@@ -594,14 +894,14 @@ pub fn build_schema() -> Vec<MethodSchema> {
         },
         MethodSchema {
             name: "getfallback",
-            description: "Get fallback data and parsed SIP-7 records for a subject. Supports * and ? wildcards for pattern matching (e.g. *@mad, @*).",
+            description: "Get fallback data and parsed SIP-7 records for a subject",
             params: vec![param(
                 "subject",
                 "Subject",
-                "@space, #numeric, num1... id, handle (sub@space) for indexed lookup, or wildcard pattern (*@mad, @*)",
-                json!("dictionary@mad"),
+                "@space, #numeric, or num1... id",
+                json!("@example"),
             )],
-            result_type: "Value",
+            result_type: "Option<FallbackResponse>",
             result_schema: Some(serde_json::to_value(schema_for!(FallbackResponse)).unwrap()),
             extra_examples: vec![],
         },
@@ -610,9 +910,63 @@ pub fn build_schema() -> Vec<MethodSchema> {
             description: "Debug method to set a space's expire height (regtest only)",
             params: vec![
                 param("space", "string", "Space name", json!("@example")),
-                param("expire_height", "integer", "New expiration height", json!(1000)),
+                param(
+                    "expire_height",
+                    "integer",
+                    "New expiration height",
+                    json!(1000),
+                ),
             ],
             result_type: "()",
+            result_schema: None,
+            extra_examples: vec![],
+        },
+        MethodSchema {
+            name: "debugbuildunbindraw",
+            description: "Debug method to build a raw num-unbind transaction with \
+                          positional inputs/outputs (regtest only)",
+            params: vec![
+                param("wallet", "string", "Wallet name", json!("default")),
+                param(
+                    "num_outpoints",
+                    "array<OutPoint>",
+                    "Num outpoints to spend",
+                    json!(["txid:0"]),
+                ),
+                param(
+                    "extra_outputs",
+                    "array<DebugRawOutput>",
+                    "Extra outputs (script_pubkey + amount) to append",
+                    json!([{"script_pubkey": "5120...", "amount": 662}]),
+                ),
+                opt_param("locktime", "integer", "Optional locktime height", json!(0)),
+                param("fee_rate", "number", "Fee rate in sat/vB", json!(1.0)),
+            ],
+            result_type: "TxResponse",
+            result_schema: Some(serde_json::to_value(schema_for!(TxResponse)).unwrap()),
+            extra_examples: vec![],
+        },
+        MethodSchema {
+            name: "debugsigntransfer",
+            description: "Debug method to produce a value-preserving num transfer \
+                          PSBT for one of the wallet's nums, to be funded via \
+                          walletfundtransfer (regtest only)",
+            params: vec![
+                param("wallet", "string", "Wallet name", json!("default")),
+                param(
+                    "subject",
+                    "string",
+                    "Space, numeric, or num id to transfer",
+                    json!("num1..."),
+                ),
+                param(
+                    "recipient",
+                    "string",
+                    "Recipient script pubkey (hex)",
+                    json!("5120..."),
+                ),
+            ],
+            result_type: "string",
             result_schema: None,
             extra_examples: vec![],
         },
@@ -646,7 +1000,7 @@ pub fn to_markdown() -> String {
                     p.description
                 ));
             }
-            md.push_str("\n");
+            md.push('\n');
         }
 
         md.push_str(&format!("**Returns:** `{}`\n\n", method.result_type));
