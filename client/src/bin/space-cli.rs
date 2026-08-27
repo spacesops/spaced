@@ -159,6 +159,9 @@ enum Commands {
     ///
     /// Optional SIP-7 fallback data can be attached in the same transaction using
     /// `--txt`, `--addr`, `--blob`, `--raw`, or `--stdin` (same format as `setfallback`).
+    ///
+    /// Examples:
+    ///   space-cli createnum --txt btc=bc1q... --dry-run
     #[command(name = "createnum")]
     CreateNum {
         /// Optional script public key as hex string.
@@ -171,6 +174,10 @@ enum Commands {
 
         #[arg(long, short)]
         fee_rate: Option<u64>,
+        /// Print hex of the OP_RETURN data payload (SIP-7 bytes) and the raw
+        /// transaction that would be broadcast, then exit without broadcasting.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Get num info
     #[command(name = "getnum")]
@@ -441,8 +448,8 @@ enum Commands {
         /// Fee rate to use in sat/vB
         #[arg(long, short)]
         fee_rate: Option<u64>,
-        /// Print hex of the OP_RETURN data payload (SIP-7 bytes) and exit (no RPC / no transaction).
-        /// SUBJECT is still required by the parser but ignored.
+        /// Print hex of the OP_RETURN data payload (SIP-7 bytes) and the raw
+        /// transaction that would be broadcast, then exit without broadcasting.
         #[arg(long)]
         dry_run: bool,
     },
@@ -613,11 +620,56 @@ impl SpaceCli {
                     force: self.force,
                     confirmed_only,
                     skip_tx_check: self.skip_tx_check,
+                    dry_run: false,
                 },
             )
             .await?;
 
         print_wallet_response(self.network.fallback_network(), result, self.format);
+        Ok(())
+    }
+
+    /// Build and sign `req` without broadcasting. Prints each result's raw tx hex.
+    async fn send_dry_run(
+        &self,
+        req: RpcWalletRequest,
+        fee_rate: Option<u64>,
+    ) -> Result<(), ClientError> {
+        let fee_rate = fee_rate.map(|fee| FeeRate::from_sat_per_vb(fee).unwrap());
+        let result = self
+            .client
+            .wallet_send_request(
+                &self.wallet,
+                RpcWalletTxBuilder {
+                    bidouts: None,
+                    requests: vec![req],
+                    fee_rate,
+                    dust: self.dust,
+                    force: self.force,
+                    confirmed_only: false,
+                    skip_tx_check: self.skip_tx_check,
+                    dry_run: true,
+                },
+            )
+            .await?;
+        let mut printed_raw = false;
+        for tx in result.result {
+            if let Some(errors) = tx.error {
+                return Err(ClientError::Custom(format!(
+                    "dry-run tx error: {:?}",
+                    errors
+                )));
+            }
+            if let Some(raw) = tx.raw {
+                println!("{}", raw);
+                printed_raw = true;
+            }
+        }
+        if !printed_raw {
+            return Err(ClientError::Custom(
+                "dry-run: wallet did not return a raw transaction".into(),
+            ));
+        }
         Ok(())
     }
 }
@@ -899,6 +951,11 @@ async fn handle_commands(cli: &SpaceCli, command: Commands) -> Result<(), Client
 
             if dry_run {
                 println!("{}", hex::encode(&data));
+                cli.send_dry_run(
+                    RpcWalletRequest::SetFallback(SetFallbackParams { subject, data }),
+                    fee_rate,
+                )
+                .await?;
             } else {
                 cli.send_request(
                     Some(RpcWalletRequest::SetFallback(SetFallbackParams { subject, data })),
@@ -1149,30 +1206,53 @@ async fn handle_commands(cli: &SpaceCli, command: Commands) -> Result<(), Client
             bind_spk,
             fallback,
             fee_rate,
+            dry_run,
         } => {
-            let spk = match bind_spk {
-                Some(hex) => {
-                    let spk = ScriptBuf::from(hex::decode(hex)
-                        .map_err(|_| ClientError::Custom("Invalid spk hex".to_string()))?);
-                    let num_id = NumId::from_spk::<Sha256>(spk.clone());
-                    println!("Creating num id: {}", num_id);
-                    Some(spk)
-                }
-                None => {
-                    println!("Creating num with auto-generated address");
-                    None
-                }
-            };
-            let data = fallback
-                .optional_payload()
-                .map_err(|e| ClientError::Custom(e.to_string()))?;
-            cli.send_request(
-                Some(RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: spk, data })),
-                None,
-                fee_rate,
-                false,
-            )
-            .await?
+            if dry_run {
+                let data = fallback.required_payload().map_err(|e| ClientError::Custom(e.to_string()))?;
+                println!("{}", hex::encode(&data));
+
+                let spk = match bind_spk {
+                    Some(hex) => {
+                        let spk = ScriptBuf::from(hex::decode(hex)
+                            .map_err(|_| ClientError::Custom("Invalid spk hex".to_string()))?);
+                        Some(spk)
+                    }
+                    None => None,
+                };
+                cli.send_dry_run(
+                    RpcWalletRequest::CreateNum(CreateNumParams {
+                        bind_spk: spk,
+                        data: Some(data),
+                    }),
+                    fee_rate,
+                )
+                .await?;
+            } else {
+                let spk = match bind_spk {
+                    Some(hex) => {
+                        let spk = ScriptBuf::from(hex::decode(hex)
+                            .map_err(|_| ClientError::Custom("Invalid spk hex".to_string()))?);
+                        let num_id = NumId::from_spk::<Sha256>(spk.clone());
+                        println!("Creating num id: {}", num_id);
+                        Some(spk)
+                    }
+                    None => {
+                        println!("Creating num with auto-generated address");
+                        None
+                    }
+                };
+                let data = fallback
+                    .optional_payload()
+                    .map_err(|e| ClientError::Custom(e.to_string()))?;
+                cli.send_request(
+                    Some(RpcWalletRequest::CreateNum(CreateNumParams { bind_spk: spk, data })),
+                    None,
+                    fee_rate,
+                    false,
+                )
+                .await?
+            }
         }
         Commands::GetNum { subject } => {
             let num = cli

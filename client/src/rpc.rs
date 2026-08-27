@@ -628,6 +628,9 @@ pub struct RpcWalletTxBuilder {
     pub force: bool,
     pub confirmed_only: bool,
     pub skip_tx_check: bool,
+    /// Build and sign but do not broadcast. Raw tx hex is returned in each result's `raw` field.
+    #[serde(default)]
+    pub dry_run: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -1575,6 +1578,7 @@ impl RpcServer for RpcServerImpl {
             force: false,
             confirmed_only: false,
             skip_tx_check: false,
+            dry_run: false,
         };
         self.wallet_send_request(wallet, request).await
     }

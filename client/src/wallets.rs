@@ -2209,6 +2209,10 @@ impl RpcWallet {
             }
 
             let raw = bitcoin::consensus::encode::serialize_hex(&tx_record.tx);
+            if tx.dry_run {
+                result_set.last_mut().unwrap().raw = Some(raw);
+                continue;
+            }
             let result = source.rpc.broadcast_tx(&source.client, &tx_record.tx);
             match result {
                 Ok(last_seen) => {

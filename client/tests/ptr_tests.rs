@@ -59,6 +59,7 @@ async fn wallet_do(
                 force,
                 confirmed_only: false,
                 skip_tx_check: false,
+                dry_run: false,
             },
         )
         .await?;
