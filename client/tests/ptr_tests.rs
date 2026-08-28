@@ -786,7 +786,8 @@ async fn it_should_create_ptr_with_data_in_one_tx(rig: &TestRig) -> anyhow::Resu
     let spk = bitcoin::address::Address::from_str(&addr)?
         .assume_checked()
         .script_pubkey();
-    let test_data = b"Created with fallback data".to_vec();
+    let records = sip7::RecordSet::pack(vec![sip7::Record::txt("btc", &["bc1qtest"])]).unwrap();
+    let test_data = records.as_slice().to_vec();
 
     wallet_do(
         rig,
@@ -813,6 +814,8 @@ async fn it_should_create_ptr_with_data_in_one_tx(rig: &TestRig) -> anyhow::Resu
         Some(Bytes::new(test_data)),
         "PTR should have data from create tx"
     );
+    let parsed = ptr.records.expect("create data should parse as SIP-7 records");
+    assert_eq!(parsed.unpack().unwrap().len(), 1, "should have 1 SIP-7 record");
     Ok(())
 }
 

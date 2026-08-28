@@ -179,7 +179,7 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Get num info
+    /// Get num info, including parsed SIP-7 records when on-chain data is valid
     #[command(name = "getnum")]
     GetNum {
         /// Space name, numeric, or num id
@@ -1260,7 +1260,7 @@ async fn handle_commands(cli: &SpaceCli, command: Commands) -> Result<(), Client
                 .get_num(subject)
                 .await
                 .map_err(|e| ClientError::Custom(e.to_string()))?;
-            println!("{}", serde_json::to_string(&num).expect("result"));
+            println!("{}", serde_json::to_string_pretty(&num).expect("result"));
         }
         Commands::Unbind {
             subjects,

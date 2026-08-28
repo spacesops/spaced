@@ -272,7 +272,7 @@ pub trait Rpc {
     async fn get_num(
         &self,
         subject: Subject,
-    ) -> Result<Option<FullNumOut>, ErrorObjectOwned>;
+    ) -> Result<Option<GetNumResponse>, ErrorObjectOwned>;
 
     #[method(name = "getnumowner")]
     async fn get_num_owner(
@@ -613,6 +613,32 @@ pub struct FallbackResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub records: Option<sip7::RecordSet>,
+}
+
+/// `getnum` result: the live num output plus parsed SIP-7 records when `data` is valid SIP-7.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct GetNumResponse {
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    pub txid: Txid,
+    #[serde(flatten)]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    pub numout: NumOut,
+    /// Parsed SIP-7 records, if `num.data` is valid SIP-7 (same as `getfallback` `records`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
+    pub records: Option<sip7::RecordSet>,
+}
+
+impl From<FullNumOut> for GetNumResponse {
+    fn from(info: FullNumOut) -> Self {
+        let records = sip7_records_for_num_data(&info.numout.num.data);
+        Self {
+            txid: info.txid,
+            numout: info.numout,
+            records,
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -1201,13 +1227,13 @@ impl RpcServer for RpcServerImpl {
         Ok(spaceout)
     }
 
-    async fn get_num(&self, subject: Subject) -> Result<Option<FullNumOut>, ErrorObjectOwned> {
+    async fn get_num(&self, subject: Subject) -> Result<Option<GetNumResponse>, ErrorObjectOwned> {
         let info = self
             .store
             .get_ptr(subject)
             .await
             .map_err(|error| ErrorObjectOwned::owned(-1, error.to_string(), None::<String>))?;
-        Ok(info)
+        Ok(info.map(GetNumResponse::from))
     }
 
     async fn get_num_owner(&self, subject: Subject) -> Result<Option<OutPoint>, ErrorObjectOwned> {

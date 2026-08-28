@@ -120,14 +120,14 @@ pub fn build_schema() -> Vec<MethodSchema> {
         // Num queries
         MethodSchema {
             name: "getnum",
-            description: "Get full num output by numeric id or num id",
+            description: "Get full num output by numeric id or num id, including parsed SIP-7 records when data is valid",
             params: vec![param(
                 "subject",
                 "Subject",
                 "#numeric or num1... id",
                 json!("#1-2-3"),
             )],
-            result_type: "Option<FullNumOut>",
+            result_type: "Option<GetNumResponse>",
             result_schema: None,
             extra_examples: vec![],
         },
