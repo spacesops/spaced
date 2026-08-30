@@ -474,6 +474,12 @@ enum Commands {
         /// Space name (e.g., @example)
         space: String,
     },
+    /// Export the taproot-tweaked private key (hex) for the space
+    #[command(name = "getprivtweak")]
+    GetPrivTweak {
+        /// Space name (e.g., @example)
+        space: String,
+    },
     /// Verify a signed Nostr event against the space's or numeric's public key
     #[command(name = "verifyevent")]
     VerifyEvent {
@@ -993,6 +999,16 @@ async fn handle_commands(cli: &SpaceCli, command: Commands) -> Result<(), Client
                 .wallet_get_nsec(&cli.wallet, subject)
                 .await?;
             println!("{nsec}");
+        }
+        Commands::GetPrivTweak { mut space } => {
+            space = normalize_space(&space);
+            let subject = Subject::from_str(&space)
+                .map_err(|e| ClientError::Custom(e.to_string()))?;
+            let key = cli
+                .client
+                .wallet_get_priv_tweak(&cli.wallet, subject)
+                .await?;
+            println!("{key}");
         }
         Commands::VerifyEvent { mut space, input } => {
             let event = read_event(input)

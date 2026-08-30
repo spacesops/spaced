@@ -388,6 +388,13 @@ pub trait Rpc {
         subject: Subject,
     ) -> Result<String, ErrorObjectOwned>;
 
+    #[method(name = "walletgetprivtweak")]
+    async fn wallet_get_priv_tweak(
+        &self,
+        wallet: &str,
+        subject: Subject,
+    ) -> Result<String, ErrorObjectOwned>;
+
     #[method(name = "verifyevent")]
     async fn verify_event(
         &self,
@@ -1444,6 +1451,18 @@ impl RpcServer for RpcServerImpl {
         self.wallet(&wallet)
             .await?
             .send_get_nsec(subject)
+            .await
+            .map_err(|error| ErrorObjectOwned::owned(-1, error.to_string(), None::<String>))
+    }
+
+    async fn wallet_get_priv_tweak(
+        &self,
+        wallet: &str,
+        subject: Subject,
+    ) -> Result<String, ErrorObjectOwned> {
+        self.wallet(&wallet)
+            .await?
+            .send_get_priv_tweak(subject)
             .await
             .map_err(|error| ErrorObjectOwned::owned(-1, error.to_string(), None::<String>))
     }

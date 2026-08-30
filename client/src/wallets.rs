@@ -387,6 +387,10 @@ pub enum WalletCommand {
         subject: Subject,
         resp: crate::rpc::Responder<anyhow::Result<String>>,
     },
+    GetPrivTweak {
+        subject: Subject,
+        resp: crate::rpc::Responder<anyhow::Result<String>>,
+    },
     /// Regtest-only debug builder for hand-crafted unbind/revive txs.
     /// Skips the wallet's correctness invariants so tests can drive
     /// protocol-level edge cases (multi-output destroys, same-tx revive+die).
@@ -875,6 +879,9 @@ impl RpcWallet {
             }
             WalletCommand::GetNsec { subject, resp } => {
                 _ = resp.send(wallet.get_nsec::<Sha256, _>(chain, subject));
+            }
+            WalletCommand::GetPrivTweak { subject, resp } => {
+                _ = resp.send(wallet.get_priv_tweak::<Sha256, _>(chain, subject));
             }
             WalletCommand::DebugBuildUnbindRaw {
                 num_outpoints,
@@ -2589,6 +2596,14 @@ impl RpcWallet {
         let (resp, resp_rx) = oneshot::channel();
         self.sender
             .send(WalletCommand::GetNsec { subject, resp })
+            .await?;
+        resp_rx.await?
+    }
+
+    pub async fn send_get_priv_tweak(&self, subject: Subject) -> anyhow::Result<String> {
+        let (resp, resp_rx) = oneshot::channel();
+        self.sender
+            .send(WalletCommand::GetPrivTweak { subject, resp })
             .await?;
         resp_rx.await?
     }

@@ -690,6 +690,18 @@ impl SpacesWallet {
         nostr::encode_nsec(&secret)
     }
 
+    /// Taproot-tweaked private key for the subject's UTXO, as 32-byte hex.
+    pub fn get_priv_tweak<H: KeyHasher, S: SpacesSource + NumSource>(
+        &mut self,
+        src: &mut S,
+        subject: Subject,
+    ) -> anyhow::Result<String> {
+        use bitcoin::hex::DisplayHex;
+        let keypair = self.taproot_keypair_for_subject::<H, S>(src, &subject)?;
+        let secret = keypair.to_keypair().secret_key().secret_bytes();
+        Ok(secret.to_lower_hex_string())
+    }
+
     pub fn sign_event<H: KeyHasher, S: SpacesSource + NumSource>(
         &mut self,
         src: &mut S,
