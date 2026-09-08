@@ -136,10 +136,9 @@ impl Chain {
         self.db.num.state.get_num_info(key)
     }
 
-    /// Live num outputs whose locking script matches `script_pubkey` bytes (chain-wide, no wallet).
-    pub fn list_live_nums_with_script_pubkey(
+    /// All live nums on the indexed chain (no wallet, no filter).
+    pub fn get_all_nums(
         &mut self,
-        script_pubkey: &[u8],
     ) -> anyhow::Result<Vec<(Txid, NumOut, Option<SLabel>)>> {
         use std::collections::HashSet;
         let ids: HashSet<NumId> = self.idx.db.collect_distinct_num_ids()?;
@@ -148,9 +147,6 @@ impl Chain {
             let Some(fpo) = self.get_num_info(&id)? else {
                 continue;
             };
-            if fpo.numout.script_pubkey.as_bytes() != script_pubkey {
-                continue;
-            }
             let rsk = DelegatorKey::from_id::<Sha256>(fpo.numout.num.id);
             let delegating_for =
                 NumSource::get_delegator(self, &rsk).map_err(|e| anyhow!("get_delegator: {}", e))?;
@@ -158,6 +154,16 @@ impl Chain {
         }
         nums.sort_by_key(|(txid, n, _)| (*txid, n.n));
         nums.dedup_by_key(|(txid, n, _)| (*txid, n.n));
+        Ok(nums)
+    }
+
+    /// Live num outputs whose locking script matches `script_pubkey` bytes (chain-wide, no wallet).
+    pub fn list_live_nums_with_script_pubkey(
+        &mut self,
+        script_pubkey: &[u8],
+    ) -> anyhow::Result<Vec<(Txid, NumOut, Option<SLabel>)>> {
+        let mut nums = self.get_all_nums()?;
+        nums.retain(|(_, n, _)| n.script_pubkey.as_bytes() == script_pubkey);
         Ok(nums)
     }
 

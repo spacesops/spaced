@@ -225,6 +225,74 @@ pub struct NumEntry {
     pub records: Option<sip7::RecordSet>,
 }
 
+/// CLI/RPC filter `KEY=VALUE` against SIP-7 TXT records.
+///
+/// `VALUE` of `*` matches any TXT record with that key. Any other value is a
+/// substring match against any string in that TXT record's `value` array.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TxtRecordFilter {
+    pub key: String,
+    /// `None` means `*` (key present with any value).
+    pub value: Option<String>,
+}
+
+impl FromStr for TxtRecordFilter {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (key, value) = s.split_once('=').ok_or_else(|| {
+            "filter must be KEY=VALUE (e.g. type=* or type=nsite-gateway)".to_string()
+        })?;
+        if key.is_empty() {
+            return Err("filter key must not be empty".to_string());
+        }
+        if value.is_empty() {
+            return Err("filter value must not be empty (use * to match any)".to_string());
+        }
+        Ok(Self {
+            key: key.to_string(),
+            value: if value == "*" {
+                None
+            } else {
+                Some(value.to_string())
+            },
+        })
+    }
+}
+
+impl NumEntry {
+    /// True if `records` has a TXT record whose key matches the filter.
+    pub fn matches_txt_filter(&self, filter: &TxtRecordFilter) -> bool {
+        txt_records_match(self.records.as_ref(), filter)
+    }
+}
+
+pub fn txt_records_match(records: Option<&sip7::RecordSet>, filter: &TxtRecordFilter) -> bool {
+    let Some(records) = records else {
+        return false;
+    };
+    let Ok(parsed) = records.unpack() else {
+        return false;
+    };
+    for r in parsed {
+        let sip7::ParsedRecord::Txt { key, value } = r else {
+            continue;
+        };
+        if key != filter.key {
+            continue;
+        }
+        match &filter.value {
+            None => return true,
+            Some(needle) => {
+                if value.iter().any(|v| v.contains(needle.as_str())) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 /// If num payload bytes are valid SIP-7, returns a `RecordSet` for JSON (same check as `getfallback`).
 pub(crate) fn sip7_records_for_num_data(data: &Option<Bytes>) -> Option<sip7::RecordSet> {
     let b = data.as_ref()?;
@@ -2738,4 +2806,73 @@ fn find_delegate_utxo(chain: &mut Chain, subject: &Subject) -> anyhow::Result<Fu
     };
 
     Ok(num_utxo)
+}
+
+#[cfg(test)]
+mod txt_filter_tests {
+    use super::*;
+
+    fn pack_txt(pairs: &[(&str, &[&str])]) -> sip7::RecordSet {
+        sip7::RecordSet::pack(
+            pairs
+                .iter()
+                .map(|(k, v)| sip7::Record::txt(k, v)),
+        )
+        .expect("pack")
+    }
+
+    fn parse(s: &str) -> TxtRecordFilter {
+        s.parse().expect("filter")
+    }
+
+    #[test]
+    fn parse_star_and_value() {
+        assert_eq!(
+            parse("type=*"),
+            TxtRecordFilter {
+                key: "type".into(),
+                value: None
+            }
+        );
+        assert_eq!(
+            parse("type=nsite-gateway"),
+            TxtRecordFilter {
+                key: "type".into(),
+                value: Some("nsite-gateway".into())
+            }
+        );
+        assert!("type".parse::<TxtRecordFilter>().is_err());
+        assert!("=nsite".parse::<TxtRecordFilter>().is_err());
+        assert!("type=".parse::<TxtRecordFilter>().is_err());
+    }
+
+    #[test]
+    fn star_matches_any_txt_with_key() {
+        let rs = pack_txt(&[("type", &["nsite-gateway"]), ("website", &["http://x"])]);
+        assert!(txt_records_match(Some(&rs), &parse("type=*")));
+        assert!(txt_records_match(Some(&rs), &parse("website=*")));
+        assert!(!txt_records_match(Some(&rs), &parse("handle=*")));
+        assert!(!txt_records_match(None, &parse("type=*")));
+    }
+
+    #[test]
+    fn value_is_substring_on_txt_values() {
+        let rs = pack_txt(&[
+            ("type", &["nsite-gateway"]),
+            ("type", &["spaces-nginx"]),
+        ]);
+        assert!(txt_records_match(Some(&rs), &parse("type=nsite-gateway")));
+        assert!(txt_records_match(Some(&rs), &parse("type=nsite")));
+        assert!(txt_records_match(Some(&rs), &parse("type=spaces-nginx")));
+        assert!(!txt_records_match(Some(&rs), &parse("type=other")));
+        assert!(!txt_records_match(Some(&rs), &parse("website=nsite-gateway")));
+    }
+
+    #[test]
+    fn addr_records_are_not_txt() {
+        let rs = sip7::RecordSet::pack(vec![sip7::Record::addr("type", &["nsite-gateway"])])
+            .expect("pack");
+        assert!(!txt_records_match(Some(&rs), &parse("type=*")));
+        assert!(!txt_records_match(Some(&rs), &parse("type=nsite-gateway")));
+    }
 }

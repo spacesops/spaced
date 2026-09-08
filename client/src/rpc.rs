@@ -139,6 +139,9 @@ pub enum ChainStateCommand {
     GetAllSpaces {
         resp: Responder<anyhow::Result<Vec<FullSpaceOut>>>,
     },
+    GetAllNums {
+        resp: Responder<anyhow::Result<ListNumsResponse>>,
+    },
     GetSpaceout {
         outpoint: OutPoint,
         resp: Responder<anyhow::Result<Option<SpaceOut>>>,
@@ -258,6 +261,10 @@ pub trait Rpc {
 
     #[method(name = "getallspaces")]
     async fn get_all_spaces(&self) -> Result<Vec<FullSpaceOut>, ErrorObjectOwned>;
+
+    /// List all live nums on the indexed chain. Same JSON shape as `walletlistnums`; no wallet, no filter.
+    #[method(name = "getallnums")]
+    async fn get_all_nums(&self) -> Result<ListNumsResponse, ErrorObjectOwned>;
 
     #[method(name = "getspaceowner")]
     async fn get_space_owner(
@@ -1207,6 +1214,13 @@ impl RpcServer for RpcServerImpl {
     async fn get_all_spaces(&self) -> Result<Vec<FullSpaceOut>, ErrorObjectOwned> {
         self.store
             .get_all_spaces()
+            .await
+            .map_err(|error| ErrorObjectOwned::owned(-1, error.to_string(), None::<String>))
+    }
+
+    async fn get_all_nums(&self) -> Result<ListNumsResponse, ErrorObjectOwned> {
+        self.store
+            .get_all_nums()
             .await
             .map_err(|error| ErrorObjectOwned::owned(-1, error.to_string(), None::<String>))
     }
@@ -2177,6 +2191,10 @@ impl AsyncChainState {
                 let result = state.get_all_spaces();
                 let _ = resp.send(result);
             }
+            ChainStateCommand::GetAllNums { resp } => {
+                let result = state.get_all_nums().map(list_nums_response_from_rows);
+                let _ = resp.send(result);
+            }
             ChainStateCommand::GetSpaceout { outpoint, resp } => {
                 let result = state
                     .get_spaceout(&outpoint)
@@ -2232,23 +2250,9 @@ impl AsyncChainState {
                 script_pubkey,
                 resp,
             } => {
-                let result = (|| {
-                    let rows =
-                        state.list_live_nums_with_script_pubkey(script_pubkey.as_bytes())?;
-                    let nums = rows
-                        .into_iter()
-                        .map(|(txid, numout, delegating_for)| {
-                            let records = sip7_records_for_num_data(&numout.num.data);
-                            NumEntry {
-                                txid,
-                                numout,
-                                delegating_for,
-                                records,
-                            }
-                        })
-                        .collect();
-                    Ok(ListNumsResponse { nums })
-                })();
+                let result = state
+                    .list_live_nums_with_script_pubkey(script_pubkey.as_bytes())
+                    .map(list_nums_response_from_rows);
                 let _ = resp.send(result);
             }
             ChainStateCommand::GetBlockMeta {
@@ -2689,6 +2693,14 @@ impl AsyncChainState {
         resp_rx.await?
     }
 
+    pub async fn get_all_nums(&self) -> anyhow::Result<ListNumsResponse> {
+        let (resp, resp_rx) = oneshot::channel();
+        self.sender
+            .send(ChainStateCommand::GetAllNums { resp })
+            .await?;
+        resp_rx.await?
+    }
+
     pub async fn get_ptr(&self, subject: Subject) -> anyhow::Result<Option<FullNumOut>> {
         let (resp, resp_rx) = oneshot::channel();
         self.sender
@@ -2853,6 +2865,25 @@ impl AsyncChainState {
             })
             .await?;
         resp_rx.await?
+    }
+}
+
+fn list_nums_response_from_rows(
+    rows: Vec<(Txid, NumOut, Option<SLabel>)>,
+) -> ListNumsResponse {
+    ListNumsResponse {
+        nums: rows
+            .into_iter()
+            .map(|(txid, numout, delegating_for)| {
+                let records = sip7_records_for_num_data(&numout.num.data);
+                NumEntry {
+                    txid,
+                    numout,
+                    delegating_for,
+                    records,
+                }
+            })
+            .collect(),
     }
 }
 

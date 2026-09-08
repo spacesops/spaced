@@ -19,17 +19,17 @@ use spaces_client::{
     config::{default_cookie_path, default_spaces_rpc_port, ExtendedNetwork},
     fallback_payload::FallbackDataFlags,
     format::{
-        print_error_rpc_response, print_list_bidouts, print_list_nums_response,
-        print_list_spaces_response, print_list_transactions, print_list_unspent,
-        print_list_wallets, print_server_info, print_wallet_balance_response,
-        print_wallet_info, print_wallet_response, Format,
+        print_create_num_bindings_from_events, print_error_rpc_response, print_list_bidouts,
+        print_list_nums_response, print_list_spaces_response, print_list_transactions,
+        print_list_unspent, print_list_wallets, print_server_info,
+        print_wallet_balance_response, print_wallet_info, print_wallet_response, Format,
     },
     rpc::{
         BidParams, OpenParams, RegisterParams, RpcClient, RpcWalletRequest,
         RpcWalletTxBuilder, SendCoinsParams, Subject, TransferSpacesParams,
     },
     store::Sha256,
-    wallets::{AddressKind, ListNumsResponse, WalletResponse},
+    wallets::{AddressKind, ListNumsResponse, TxtRecordFilter, WalletResponse},
 };
 use spaces_protocol::bitcoin::{Amount, FeeRate, OutPoint, Txid};
 use spaces_protocol::slabel::SLabel;
@@ -154,6 +154,21 @@ enum Commands {
         /// Only return spaces that have reached expiration
         #[arg(long)]
         expired: bool,
+    },
+    /// Get all known nums on the indexed chain (no wallet).
+    ///
+    /// Optional `--filter KEY=VALUE` keeps nums with a SIP-7 TXT record for KEY.
+    /// Use `*` to match any value, or a substring such as `nsite-gateway`.
+    ///
+    /// Examples:
+    ///   space-cli getallnums --filter type=*
+    ///   space-cli getallnums --filter type=nsite-gateway
+    #[command(name = "getallnums")]
+    GetAllNums {
+        /// Filter by SIP-7 TXT record: `type=*` (any value) or `type=nsite-gateway`
+        /// (value contains that string).
+        #[arg(long, value_name = "KEY=VALUE")]
+        filter: Option<TxtRecordFilter>,
     },
     /// Create a new num.
     ///
@@ -666,6 +681,11 @@ impl SpaceCli {
                     errors
                 )));
             }
+            print_create_num_bindings_from_events(
+                self.network.fallback_network(),
+                &tx.events,
+                "",
+            );
             if let Some(raw) = tx.raw {
                 println!("{}", raw);
                 printed_raw = true;
@@ -789,6 +809,13 @@ async fn handle_commands(cli: &SpaceCli, command: Commands) -> Result<(), Client
                 });
             }
             println!("{}", serde_json::to_string_pretty(&spaces)?);
+        }
+        Commands::GetAllNums { filter } => {
+            let mut nums = cli.client.get_all_nums().await?;
+            if let Some(filter) = filter {
+                nums.nums.retain(|entry| entry.matches_txt_filter(&filter));
+            }
+            println!("{}", serde_json::to_string_pretty(&nums)?);
         }
         Commands::GetSpaceOut { outpoint } => {
             let response = cli.client.get_spaceout(outpoint).await?;

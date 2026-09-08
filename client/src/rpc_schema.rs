@@ -184,6 +184,14 @@ pub fn build_schema() -> Vec<MethodSchema> {
             result_schema: Some(serde_json::to_value(schema_for!(ListNumsResponse)).unwrap()),
             extra_examples: vec![],
         },
+        MethodSchema {
+            name: "getallnums",
+            description: "Get all live nums on the indexed chain (same result shape as walletlistnums; no wallet, no filter)",
+            params: vec![],
+            result_type: "ListNumsResponse",
+            result_schema: Some(serde_json::to_value(schema_for!(ListNumsResponse)).unwrap()),
+            extra_examples: vec![],
+        },
         // Commitment/delegation queries
         MethodSchema {
             name: "getcommitment",
