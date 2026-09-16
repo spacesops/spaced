@@ -15,7 +15,7 @@ use rand::{
     {Rng, thread_rng},
 };
 use serde::Deserialize;
-use spaces_protocol::{bitcoin::Network, constants::ChainAnchor};
+use spaces_protocol::bitcoin::Network;
 
 use crate::store::chain::{Chain, ROOT_ANCHORS_COUNT};
 use crate::{
@@ -135,16 +135,6 @@ impl ExtendedNetwork {
             "signet" => Ok(ExtendedNetwork::Signet),
             "regtest" => Ok(ExtendedNetwork::Regtest),
             _ => Err(()),
-        }
-    }
-
-    pub fn genesis(&self) -> ChainAnchor {
-        match self {
-            ExtendedNetwork::Testnet => ChainAnchor::TESTNET(),
-            ExtendedNetwork::Testnet4 => ChainAnchor::TESTNET4(),
-            ExtendedNetwork::Regtest => ChainAnchor::REGTEST(),
-            ExtendedNetwork::Mainnet => ChainAnchor::MAINNET(),
-            _ => panic!("unsupported network"),
         }
     }
 }

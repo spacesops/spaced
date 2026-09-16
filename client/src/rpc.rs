@@ -51,7 +51,7 @@ use tokio::{
 };
 use spaces_protocol::bitcoin::ScriptBuf;
 use spaces_protocol::hasher::Hash;
-use spaces_nums::{NumSource, FullNumOut, NumOut, Commitment, CommitmentTipKey, CommitmentKey, DelegatorKey, NumOutpointKey, RootAnchor, ChainProofRequest, NumKeyKind, RebindData, RebindKey};
+use spaces_nums::{NumSource, FullNumOut, NumOut, Commitment, CommitmentTipKey, CommitmentKey, DelegatorKey, NumOutpointKey, RootAnchor, ChainProofRequest, NumKeyKind, RebindData, RebindKey, TrustId};
 use spaces_nums::snumeric::SNumeric;
 use spaces_nums::num_id::NumId;
 use spaces_wallet::bitcoin::hashes::sha256;
@@ -514,6 +514,9 @@ pub trait Rpc {
     #[method(name = "getrootanchors")]
     async fn get_root_anchors(&self) -> Result<Vec<RootAnchor>, ErrorObjectOwned>;
 
+    #[method(name = "gettrustids")]
+    async fn get_trust_ids(&self) -> Result<Vec<TrustId>, ErrorObjectOwned>;
+
     #[method(name = "walletlisttransactions")]
     async fn wallet_list_transactions(
         &self,
@@ -900,13 +903,20 @@ impl WalletManager {
                 .map_err(|_| anyhow!("Mnemonic generation error"))?;
 
         let start_block = self.get_wallet_start_block(client).await?;
-        self.setup_new_wallet(name.to_string(), mnemonic.to_string(), Some(start_block.height))?;
+        self.setup_new_wallet(name.to_string(), mnemonic.to_string(), start_block)?;
         self.load_wallet(name).await?;
         Ok(mnemonic.to_string())
     }
 
     pub async fn recover_wallet(&self, name: &str, mnemonic: &str) -> anyhow::Result<()> {
-        self.setup_new_wallet(name.to_string(), mnemonic.to_string(), None)?;
+        // Recovered wallets must scan from the spaces genesis so historical funds
+        // are rediscovered; only brand-new wallets start at the current tip.
+        let genesis = crate::spaces::Spaced::genesis(self.network);
+        let start_block = BlockId {
+            height: genesis.height,
+            hash: genesis.hash,
+        };
+        self.setup_new_wallet(name.to_string(), mnemonic.to_string(), start_block)?;
         self.load_wallet(name).await?;
         Ok(())
     }
@@ -915,14 +925,14 @@ impl WalletManager {
         &self,
         name: String,
         mnemonic: String,
-        start_block_height: Option<u32>,
+        start_block: BlockId,
     ) -> anyhow::Result<()> {
         let wallet_path = self.data_dir.join(&name);
         if wallet_path.exists() {
             return Err(anyhow!(format!("Wallet `{}` already exists", name)));
         }
 
-        let export = self.wallet_from_mnemonic(name.clone(), mnemonic, start_block_height)?;
+        let export = self.wallet_from_mnemonic(name.clone(), mnemonic, start_block)?;
         fs::create_dir_all(&wallet_path)?;
         let wallet_export_path = wallet_path.join("wallet.json");
         let mut file = fs::File::create(wallet_export_path)?;
@@ -934,7 +944,7 @@ impl WalletManager {
         &self,
         name: String,
         mnemonic: String,
-        start_block_height: Option<u32>,
+        start_block: BlockId,
     ) -> anyhow::Result<WalletExport> {
         let (network, _) = self.fallback_network();
         let xpriv = Self::descriptor_from_mnemonic(network, &mnemonic)?;
@@ -943,14 +953,8 @@ impl WalletManager {
         let tmp = bdk::Wallet::create(external, internal)
             .network(network)
             .create_wallet_no_persist()?;
-
-        let start_block_height = match start_block_height {
-            Some(height) => height,
-            None => self.network.genesis().height,
-        };
-
         let export =
-            WalletExport::export_wallet(&tmp, &name, start_block_height).map_err(|e| anyhow!(e))?;
+            WalletExport::export_wallet(&tmp, &name, start_block.height).map_err(|e| anyhow!(e))?;
 
         Ok(export)
     }
@@ -1130,6 +1134,7 @@ impl RpcServerImpl {
                     "/root-anchors.json",
                     "getrootanchors",
                 )?)
+                .layer(ProxyGetRequestLayer::new("/trust-ids.json", "gettrustids")?)
                 .layer(ProxyGetRequestLayer::new("/", "getserverinfo")?);
 
             let server = Server::builder()
@@ -1744,6 +1749,15 @@ impl RpcServer for RpcServerImpl {
             .get_root_anchors()
             .await
             .map_err(|error| ErrorObjectOwned::owned(-1, error.to_string(), None::<String>))
+    }
+
+    async fn get_trust_ids(&self) -> Result<Vec<TrustId>, ErrorObjectOwned> {
+        let anchors = self
+            .store
+            .get_root_anchors()
+            .await
+            .map_err(|error| ErrorObjectOwned::owned(-1, error.to_string(), None::<String>))?;
+        Ok(spaces_nums::compute_trust_ids(&anchors))
     }
 
     async fn wallet_list_transactions(

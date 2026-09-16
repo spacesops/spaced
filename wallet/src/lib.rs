@@ -516,7 +516,7 @@ impl SpacesWallet {
         })
     }
 
-    pub fn transactions(&self) -> impl Iterator<Item=WalletTx<'_>> + '_ {
+    pub fn transactions(&self) -> impl Iterator<Item = WalletTx<'_>> + '_ {
         self.internal
             .transactions()
             .filter(|tx| !is_revert_tx(tx) && self.internal.spk_index().is_tx_relevant(&tx.tx_node))

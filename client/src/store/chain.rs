@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 use anyhow::{anyhow, Context};
-use log::info;
+use log::{info, warn};
 use spacedb::Hash;
 use spaces_protocol::bitcoin::{BlockHash, OutPoint, Txid};
 use spaces_nums::num_id::NumId;
@@ -199,6 +199,12 @@ impl Chain {
         // nums tree from `nums_genesis` (root.sdb / spaces state is untouched).
         let nums_db_path = dir.join("nums_v2.sdb");
         let initial_num_sync = !nums_db_path.exists();
+
+        // Older nodes stored spaces state in `protocol.sdb`; the format changed
+        // and the file was renamed, so we resync into a fresh `root.sdb`.
+        if dir.join("protocol.sdb").exists() && !proto_db_path.exists() {
+            info!("Migrating database, resyncing spaces state from genesis");
+        }
 
         let sp_store = SpStore::open(proto_db_path, index_hashes, cache_size)?;
         let sp = SpLiveStore {
@@ -550,9 +556,15 @@ impl Chain {
 
         info!("Updating root anchors ...");
 
-        // Load previous anchors from file
+        // Load previous anchors from file. The anchors cache is a derived
+        // artifact; an unreadable or older-format file (e.g. left by a pre-nums
+        // node across an upgrade) is rebuilt rather than fatal — the write below
+        // replaces it in the current format.
         let previous: Vec<RootAnchor> = match fs::read(anchors_path) {
-            Ok(bytes) => serde_json::from_slice(&bytes)?,
+            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+                warn!("Rebuilding root anchors: previous cache is unreadable ({e})");
+                Vec::new()
+            }),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(e.into()),
         };
