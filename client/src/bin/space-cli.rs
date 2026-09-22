@@ -501,11 +501,13 @@ enum Commands {
         #[arg(short, long)]
         input: Option<PathBuf>,
     },
-    /// Export the Nostr nsec for the space's signing key (same key used by signevent)
+    /// Export the Nostr nsec and raw private key for a space or num
+    /// (same key used by signevent)
     #[command(name = "getnsec")]
     GetNsec {
-        /// Space name (e.g., @example)
-        space: String,
+        /// Space (@example), numeric (#800000-3), or num id (num1...)
+        #[arg(value_name = "SPACE|NUM")]
+        subject: Subject,
     },
     /// Export the taproot-tweaked private key (hex) for a space or num
     #[command(name = "getprivtweak")]
@@ -1077,15 +1079,18 @@ async fn handle_commands(cli: &SpaceCli, command: Commands) -> Result<(), Client
                 .await?;
             println!("{}", serde_json::to_string(&result).expect("result"));
         }
-        Commands::GetNsec { mut space } => {
-            space = normalize_space(&space);
-            let subject = Subject::from_str(&space)
-                .map_err(|e| ClientError::Custom(e.to_string()))?;
-            let nsec = cli
+        Commands::GetNsec { subject } => {
+            let key = cli
                 .client
                 .wallet_get_nsec(&cli.wallet, subject)
                 .await?;
-            println!("{nsec}");
+            match cli.format {
+                Format::Json => println!("{}", serde_json::to_string_pretty(&key)?),
+                Format::Text => {
+                    println!("nsec: {}", key.nsec);
+                    println!("hex: {}", key.hex);
+                }
+            }
         }
         Commands::GetPrivTweak { subject } => {
             let key = cli

@@ -40,7 +40,7 @@ use spaces_protocol::{
 use spaces_wallet::{
     bdk_wallet as bdk, bdk_wallet::template::Bip86, bitcoin::hashes::Hash as BitcoinHash,
     bitcoin::secp256k1::schnorr,
-    export::WalletExport, nostr::NostrEvent, Balance, DoubleUtxo, Listing, SpacesWallet,
+    export::WalletExport, nostr::{NostrEvent, NsecExport}, Balance, DoubleUtxo, Listing, SpacesWallet,
     WalletConfig, WalletDescriptors, WalletOutput,
 };
 pub use spaces_wallet::Subject;
@@ -395,7 +395,7 @@ pub trait Rpc {
         &self,
         wallet: &str,
         subject: Subject,
-    ) -> Result<String, ErrorObjectOwned>;
+    ) -> Result<NsecExport, ErrorObjectOwned>;
 
     #[method(name = "walletgetprivtweak")]
     async fn wallet_get_priv_tweak(
@@ -1469,7 +1469,7 @@ impl RpcServer for RpcServerImpl {
         &self,
         wallet: &str,
         subject: Subject,
-    ) -> Result<String, ErrorObjectOwned> {
+    ) -> Result<NsecExport, ErrorObjectOwned> {
         self.wallet(&wallet)
             .await?
             .send_get_nsec(subject)

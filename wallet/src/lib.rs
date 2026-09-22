@@ -680,14 +680,19 @@ impl SpacesWallet {
             .context("Could not derive taproot keypair to sign message")
     }
 
+    /// Nostr nsec and raw private-key hex for the subject's signing key.
     pub fn get_nsec<H: KeyHasher, S: SpacesSource + NumSource>(
         &mut self,
         src: &mut S,
         subject: Subject,
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<nostr::NsecExport> {
+        use bitcoin::hex::DisplayHex;
         let keypair = self.taproot_keypair_for_subject::<H, S>(src, &subject)?;
         let secret = keypair.to_keypair().secret_key().secret_bytes();
-        nostr::encode_nsec(&secret)
+        Ok(nostr::NsecExport {
+            nsec: nostr::encode_nsec(&secret)?,
+            hex: secret.to_lower_hex_string(),
+        })
     }
 
     /// Taproot-tweaked private key for the subject's UTXO, as 32-byte hex.

@@ -25,7 +25,7 @@ use spaces_wallet::{
     bitcoin::{Address, Amount, FeeRate, OutPoint, Psbt, absolute::LockTime, secp256k1::schnorr},
     builder::{CoinTransfer, SpaceTransfer, SpacesAwareCoinSelection},
     tx_event::{TxEvent, TxEventKind, TxRecord},
-    nostr::NostrEvent,
+    nostr::{NostrEvent, NsecExport},
     Balance, DoubleUtxo, Listing, SpacesWallet, Subject, WalletInfo, WalletOutput,
 };
 
@@ -453,7 +453,7 @@ pub enum WalletCommand {
     },
     GetNsec {
         subject: Subject,
-        resp: crate::rpc::Responder<anyhow::Result<String>>,
+        resp: crate::rpc::Responder<anyhow::Result<NsecExport>>,
     },
     GetPrivTweak {
         subject: Subject,
@@ -2660,7 +2660,7 @@ impl RpcWallet {
         resp_rx.await?
     }
 
-    pub async fn send_get_nsec(&self, subject: Subject) -> anyhow::Result<String> {
+    pub async fn send_get_nsec(&self, subject: Subject) -> anyhow::Result<NsecExport> {
         let (resp, resp_rx) = oneshot::channel();
         self.sender
             .send(WalletCommand::GetNsec { subject, resp })

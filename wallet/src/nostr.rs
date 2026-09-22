@@ -126,6 +126,14 @@ impl NostrEvent {
     }
 }
 
+/// NIP-19 `nsec` and the raw 32-byte secret key it encodes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NsecExport {
+    pub nsec: String,
+    /// Lowercase hex of the 32-byte secp256k1 secret.
+    pub hex: String,
+}
+
 /// Bech32-encode a 32-byte secp256k1 secret key as a NIP-19 `nsec`.
 pub fn encode_nsec(secret_key: &[u8; 32]) -> Result<String> {
     let hrp = Hrp::parse("nsec").context("invalid nsec hrp")?;
