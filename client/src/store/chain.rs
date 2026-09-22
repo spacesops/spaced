@@ -1,9 +1,14 @@
-use std::path::Path;
-use std::sync::Arc;
-use anyhow::{anyhow, Context};
+use crate::client::{BlockMeta, NumBlockMeta};
+use crate::rpc::{BlockMetaWithHash, NumBlockMetaWithHash};
+use crate::store::index::SqliteIndex;
+use crate::store::ptrs::{NumChainState, NumLiveSnapshot, NumLiveStore, NumStore};
+use crate::store::spaces::{
+    RolloutEntry, RolloutIterator, SpLiveSnapshot, SpLiveStore, SpStore, SpStoreUtils, SpacesState,
+};
+use crate::store::{EncodableOutpoint, ReadTx, Sha256};
+use anyhow::{Context, anyhow};
 use log::{info, warn};
 use spacedb::Hash;
-use spaces_protocol::bitcoin::{BlockHash, OutPoint, Txid};
 use spaces_nums::num_id::NumId;
 use spaces_nums::snumeric::SNumeric;
 use spaces_nums::{
@@ -11,18 +16,15 @@ use spaces_nums::{
     NumSource, RebindData, RebindKey, RootAnchor,
 };
 use spaces_protocol::bitcoin::hashes::Hash as HashUtil;
+use spaces_protocol::bitcoin::{BlockHash, OutPoint, Txid};
 use spaces_protocol::constants::ChainAnchor;
 use spaces_protocol::hasher::{BidKey, OutpointKey, SpaceKey};
 use spaces_protocol::prepare::SpacesSource;
-use spaces_protocol::{FullSpaceOut, SpaceOut};
 use spaces_protocol::slabel::SLabel;
+use spaces_protocol::{FullSpaceOut, SpaceOut};
 use spaces_wallet::bitcoin::Network;
-use crate::client::{BlockMeta, NumBlockMeta};
-use crate::rpc::{BlockMetaWithHash, NumBlockMetaWithHash};
-use crate::store::{EncodableOutpoint, ReadTx, Sha256};
-use crate::store::index::SqliteIndex;
-use crate::store::ptrs::{NumChainState, NumLiveStore, NumStore};
-use crate::store::spaces::{RolloutEntry, RolloutIterator, SpLiveStore, SpStore, SpStoreUtils, SpacesState};
+use std::path::Path;
+use std::sync::Arc;
 
 pub const ROOT_ANCHORS_COUNT: u32 = 120;
 pub const COMMIT_BLOCK_INTERVAL: u32 = 36;
@@ -165,6 +167,21 @@ impl Chain {
         let mut nums = self.get_all_nums()?;
         nums.retain(|(_, n, _)| n.script_pubkey.as_bytes() == script_pubkey);
         Ok(nums)
+    }
+
+    /// The live spaces/nums snapshots (staged ∪ committed) for resolving the
+    /// current, possibly-uncommitted state.
+    pub fn live_snapshots_mut(&mut self) -> (&mut SpLiveSnapshot, &mut NumLiveSnapshot) {
+        (&mut self.db.sp.state, &mut self.db.num.state)
+    }
+
+    /// Read-only snapshots pinned to the latest committed root (empty staged),
+    /// for resolving only committed (anchored) state.
+    pub fn committed_snapshots(&self) -> anyhow::Result<(SpLiveSnapshot, NumLiveSnapshot)> {
+        Ok((
+            self.db.sp.store.read_committed()?,
+            self.db.num.store.read_committed()?,
+        ))
     }
 
     pub fn snapshot_at(&mut self, target_height: u32) -> anyhow::Result<&mut CachedSnapshot> {
