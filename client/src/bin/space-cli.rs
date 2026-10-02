@@ -537,15 +537,20 @@ enum Commands {
     },
     /// List won spaces including ones still in auction with a winning bid.
     ///
+    /// `--not-operated` keeps owned spaces with no live operator num.
     /// `--operated` keeps owned spaces whose operator num still sits on the
     /// space output. `--delegated` keeps owned spaces whose operator num has
-    /// been moved to another script. Both flags may be set. With neither, the
-    /// full list is returned.
+    /// been moved to another script. Any combination returns the union. With
+    /// none of them, the full list is returned.
     ///
-    /// `--sortby space_name` sorts A–Z. `--sortby days_left` sorts soonest
-    /// expiry or claim first. `--reverse` flips that order.
+    /// `--sortby` orders every section that is still present. `space_name`
+    /// sorts A–Z. `days_left` sorts soonest expiry or claim first. `--reverse`
+    /// flips that order.
     #[command(name = "listspaces")]
     ListSpaces {
+        /// Owned spaces that have not been operated
+        #[arg(long)]
+        not_operated: bool,
         /// Owned spaces that have been operated and not delegated
         #[arg(long)]
         operated: bool,
@@ -1160,6 +1165,7 @@ async fn handle_commands(cli: &SpaceCli, command: Commands) -> Result<(), Client
             print_list_transactions(txs, cli.format);
         }
         Commands::ListSpaces {
+            not_operated,
             operated,
             delegated,
             sortby,
@@ -1167,7 +1173,8 @@ async fn handle_commands(cli: &SpaceCli, command: Commands) -> Result<(), Client
         } => {
             let tip = cli.client.get_server_info().await?;
             let spaces = cli.client.wallet_list_spaces(&cli.wallet).await?;
-            let mut spaces = filter_list_spaces(&cli.client, spaces, operated, delegated).await?;
+            let mut spaces =
+                filter_list_spaces(&cli.client, spaces, not_operated, operated, delegated).await?;
             sort_list_spaces(&mut spaces, tip.tip.height, sortby, reverse);
             print_list_spaces_response(tip.tip.height, spaces, cli.format);
         }
@@ -1530,19 +1537,30 @@ async fn handle_commands(cli: &SpaceCli, command: Commands) -> Result<(), Client
     Ok(())
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OperatorState {
+    /// Owned, but no live operator num.
+    NotOperated,
+    /// Operator num still sits on the space output.
+    Operated,
+    /// Operator num has been moved to another script.
+    Delegated,
+}
+
 /// Keep owned spaces by operator state.
 ///
-/// A space is operated when `get_delegation` names a live num and that num's
-/// script is still the space output. It is delegated when that num has been
-/// moved to a different script. Auction rows are dropped whenever either flag
-/// is set. With both flags, every operated space is kept.
+/// A space is not operated when it has no live operator num. It is operated
+/// when `get_delegation` names a live num whose script is still the space
+/// output. It is delegated when that num has been moved. Auction rows are
+/// dropped whenever any flag is set. Multiple flags return the union.
 async fn filter_list_spaces(
     client: &HttpClient,
     mut response: ListSpacesResponse,
+    not_operated: bool,
     operated: bool,
     delegated: bool,
 ) -> Result<ListSpacesResponse, ClientError> {
-    if !operated && !delegated {
+    if !not_operated && !operated && !delegated {
         return Ok(response);
     }
 
@@ -1552,25 +1570,11 @@ async fn filter_list_spaces(
 
     let mut owned = Vec::with_capacity(response.owned.len());
     for space in response.owned {
-        let Some(name) = space.spaceout.space.as_ref().map(|s| s.name.clone()) else {
-            continue;
-        };
-        let Some(id) = client
-            .get_delegation(Subject::Label(name))
-            .await
-            .map_err(|e| ClientError::Custom(e.to_string()))?
-        else {
-            continue;
-        };
-        let Some(num) = client
-            .get_num(Subject::NumId(id))
-            .await
-            .map_err(|e| ClientError::Custom(e.to_string()))?
-        else {
-            continue;
-        };
-        let moved = num.numout.script_pubkey != space.spaceout.script_pubkey;
-        if (operated && !moved) || (delegated && moved) {
+        let state = operator_state(&client, &space).await?;
+        let keep = (not_operated && state == OperatorState::NotOperated)
+            || (operated && state == OperatorState::Operated)
+            || (delegated && state == OperatorState::Delegated);
+        if keep {
             owned.push(space);
         }
     }
@@ -1578,9 +1582,37 @@ async fn filter_list_spaces(
     Ok(response)
 }
 
-/// Sort each section. `days_left` uses claim height for auctions and
-/// `expire_height` for owned spaces. Pending rows have no height, so
-/// `days_left` leaves them as returned. Equal keys stay A–Z by name.
+async fn operator_state(
+    client: &HttpClient,
+    space: &FullSpaceOut,
+) -> Result<OperatorState, ClientError> {
+    let Some(name) = space.spaceout.space.as_ref().map(|s| s.name.clone()) else {
+        return Ok(OperatorState::NotOperated);
+    };
+    let Some(id) = client
+        .get_delegation(Subject::Label(name))
+        .await
+        .map_err(|e| ClientError::Custom(e.to_string()))?
+    else {
+        return Ok(OperatorState::NotOperated);
+    };
+    let Some(num) = client
+        .get_num(Subject::NumId(id))
+        .await
+        .map_err(|e| ClientError::Custom(e.to_string()))?
+    else {
+        return Ok(OperatorState::NotOperated);
+    };
+    if num.numout.script_pubkey != space.spaceout.script_pubkey {
+        Ok(OperatorState::Delegated)
+    } else {
+        Ok(OperatorState::Operated)
+    }
+}
+
+/// Sort every section that is still present. `days_left` uses claim height
+/// for auctions and `expire_height` for owned spaces. Pending rows have no
+/// height, so `days_left` orders them by name. Equal keys stay A–Z by name.
 fn sort_list_spaces(
     response: &mut ListSpacesResponse,
     current_block: u32,
@@ -1606,6 +1638,9 @@ fn sort_list_spaces(
             });
         }
         ListSpacesSort::DaysLeft => {
+            response.pending.sort_by(|a, b| {
+                directed(a.to_string().cmp(&b.to_string()), reverse)
+            });
             let by_days = |a: &FullSpaceOut, b: &FullSpaceOut| {
                 let primary = match (blocks_remaining(a, current_block), blocks_remaining(b, current_block)) {
                     (Some(left), Some(right)) => left.cmp(&right),
