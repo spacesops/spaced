@@ -1,6 +1,7 @@
 extern crate core;
 
 use std::{
+    cmp::Ordering,
     fs, io,
     io::{BufRead, IsTerminal, Write},
     path::PathBuf,
@@ -31,9 +32,10 @@ use spaces_client::{
         RpcWalletTxBuilder, SendCoinsParams, Subject, TransferSpacesParams,
     },
     store::Sha256,
-    wallets::{AddressKind, ListNumsResponse, TxtRecordFilter, WalletResponse},
+    wallets::{AddressKind, ListNumsResponse, ListSpacesResponse, TxtRecordFilter, WalletResponse},
 };
 use spaces_protocol::bitcoin::{Amount, FeeRate, OutPoint, Txid};
+use spaces_protocol::{Covenant, FullSpaceOut};
 use spaces_protocol::slabel::SLabel;
 use spaces_nums::num_id::NumId;
 use spaces_wallet::{bitcoin::secp256k1::schnorr::Signature, export::WalletExport, nostr::NostrEvent, Listing};
@@ -533,10 +535,30 @@ enum Commands {
         #[arg(default_value = "0")]
         skip: usize,
     },
-    /// List won spaces including ones
-    /// still in auction with a winning bid
+    /// List won spaces including ones still in auction with a winning bid.
+    ///
+    /// `--operated` keeps owned spaces whose operator num still sits on the
+    /// space output. `--delegated` keeps owned spaces whose operator num has
+    /// been moved to another script. Both flags may be set. With neither, the
+    /// full list is returned.
+    ///
+    /// `--sortby space_name` sorts A–Z. `--sortby days_left` sorts soonest
+    /// expiry or claim first. `--reverse` flips that order.
     #[command(name = "listspaces")]
-    ListSpaces,
+    ListSpaces {
+        /// Owned spaces that have been operated and not delegated
+        #[arg(long)]
+        operated: bool,
+        /// Owned spaces that have been operated and then delegated
+        #[arg(long)]
+        delegated: bool,
+        /// Sort each section by space name or days left
+        #[arg(long, value_enum)]
+        sortby: Option<ListSpacesSort>,
+        /// Reverse the --sortby order
+        #[arg(long, requires = "sortby")]
+        reverse: bool,
+    },
     /// List nums in the wallet.
     ///
     /// With `--spk`, lists matching nums from both owned and external (`--kind` is ignored).
@@ -575,6 +597,16 @@ enum Commands {
         #[arg(value_enum, default_value = "coin")]
         kind: AddressKind,
     },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ListSpacesSort {
+    /// Alphabetical by space name
+    #[value(name = "space_name")]
+    SpaceName,
+    /// Soonest claim or expiry first
+    #[value(name = "days_left")]
+    DaysLeft,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -1127,9 +1159,16 @@ async fn handle_commands(cli: &SpaceCli, command: Commands) -> Result<(), Client
                 .await?;
             print_list_transactions(txs, cli.format);
         }
-        Commands::ListSpaces => {
+        Commands::ListSpaces {
+            operated,
+            delegated,
+            sortby,
+            reverse,
+        } => {
             let tip = cli.client.get_server_info().await?;
             let spaces = cli.client.wallet_list_spaces(&cli.wallet).await?;
+            let mut spaces = filter_list_spaces(&cli.client, spaces, operated, delegated).await?;
+            sort_list_spaces(&mut spaces, tip.tip.height, sortby, reverse);
             print_list_spaces_response(tip.tip.height, spaces, cli.format);
         }
         Commands::ListNums { kind, spk } => {
@@ -1489,6 +1528,126 @@ async fn handle_commands(cli: &SpaceCli, command: Commands) -> Result<(), Client
     }
 
     Ok(())
+}
+
+/// Keep owned spaces by operator state.
+///
+/// A space is operated when `get_delegation` names a live num and that num's
+/// script is still the space output. It is delegated when that num has been
+/// moved to a different script. Auction rows are dropped whenever either flag
+/// is set. With both flags, every operated space is kept.
+async fn filter_list_spaces(
+    client: &HttpClient,
+    mut response: ListSpacesResponse,
+    operated: bool,
+    delegated: bool,
+) -> Result<ListSpacesResponse, ClientError> {
+    if !operated && !delegated {
+        return Ok(response);
+    }
+
+    response.pending.clear();
+    response.winning.clear();
+    response.outbid.clear();
+
+    let mut owned = Vec::with_capacity(response.owned.len());
+    for space in response.owned {
+        let Some(name) = space.spaceout.space.as_ref().map(|s| s.name.clone()) else {
+            continue;
+        };
+        let Some(id) = client
+            .get_delegation(Subject::Label(name))
+            .await
+            .map_err(|e| ClientError::Custom(e.to_string()))?
+        else {
+            continue;
+        };
+        let Some(num) = client
+            .get_num(Subject::NumId(id))
+            .await
+            .map_err(|e| ClientError::Custom(e.to_string()))?
+        else {
+            continue;
+        };
+        let moved = num.numout.script_pubkey != space.spaceout.script_pubkey;
+        if (operated && !moved) || (delegated && moved) {
+            owned.push(space);
+        }
+    }
+    response.owned = owned;
+    Ok(response)
+}
+
+/// Sort each section. `days_left` uses claim height for auctions and
+/// `expire_height` for owned spaces. Pending rows have no height, so
+/// `days_left` leaves them as returned. Equal keys stay A–Z by name.
+fn sort_list_spaces(
+    response: &mut ListSpacesResponse,
+    current_block: u32,
+    sortby: Option<ListSpacesSort>,
+    reverse: bool,
+) {
+    let Some(sortby) = sortby else {
+        return;
+    };
+    match sortby {
+        ListSpacesSort::SpaceName => {
+            response.pending.sort_by(|a, b| {
+                directed(a.to_string().cmp(&b.to_string()), reverse)
+            });
+            sort_full_spaces(&mut response.outbid, |a, b| {
+                directed(space_name(a).cmp(&space_name(b)), reverse)
+            });
+            sort_full_spaces(&mut response.winning, |a, b| {
+                directed(space_name(a).cmp(&space_name(b)), reverse)
+            });
+            sort_full_spaces(&mut response.owned, |a, b| {
+                directed(space_name(a).cmp(&space_name(b)), reverse)
+            });
+        }
+        ListSpacesSort::DaysLeft => {
+            let by_days = |a: &FullSpaceOut, b: &FullSpaceOut| {
+                let primary = match (blocks_remaining(a, current_block), blocks_remaining(b, current_block)) {
+                    (Some(left), Some(right)) => left.cmp(&right),
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => Ordering::Equal,
+                };
+                directed(primary, reverse).then_with(|| space_name(a).cmp(&space_name(b)))
+            };
+            sort_full_spaces(&mut response.outbid, by_days);
+            sort_full_spaces(&mut response.winning, by_days);
+            sort_full_spaces(&mut response.owned, by_days);
+        }
+    }
+}
+
+fn sort_full_spaces(spaces: &mut [FullSpaceOut], cmp: impl Fn(&FullSpaceOut, &FullSpaceOut) -> Ordering) {
+    spaces.sort_by(cmp);
+}
+
+fn directed(order: Ordering, reverse: bool) -> Ordering {
+    if reverse { order.reverse() } else { order }
+}
+
+fn space_name(space: &FullSpaceOut) -> String {
+    space
+        .spaceout
+        .space
+        .as_ref()
+        .map(|s| s.name.to_string())
+        .unwrap_or_default()
+}
+
+/// Blocks until claim (auction) or expiry (owned). `None` when the covenant
+/// has no target height.
+fn blocks_remaining(space: &FullSpaceOut, current_block: u32) -> Option<i64> {
+    let height = match space.spaceout.space.as_ref()?.covenant {
+        Covenant::Transfer { expire_height, .. } => Some(expire_height),
+        Covenant::Bid { claim_height, .. } => claim_height,
+        Covenant::Reserved => None,
+    }?;
+    Some(height as i64 - current_block as i64)
 }
 
 fn default_rpc_url(chain: &ExtendedNetwork) -> String {
